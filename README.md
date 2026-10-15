@@ -16,7 +16,11 @@ npm run dev        # play at http://localhost:5173
 npm test           # 258 automated combat tests (vitest)
 npm run build      # typecheck + production build into dist/
 npm run smoke      # builds, then runs a real-browser gameplay smoke test (Playwright/Chromium)
+npm run standalone # rebuilds hustle-rt.html: the whole game in one offline HTML file
 ```
+
+**No install needed:** download [`hustle-rt.html`](hustle-rt.html) and open it in any modern
+browser (double-click works, no server). Settings and replays are saved in that browser.
 
 ## Controls
 
