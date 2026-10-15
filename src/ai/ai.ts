@@ -71,6 +71,7 @@ export class AIController {
   private infos = new Map<string, MoveInfo>();
   private lastDecision = 0;
   private cooldown = 0;
+  private zoneCooldown = 0;
 
   constructor(diff: Difficulty, seed = 99) {
     this.diff = diff;
@@ -259,6 +260,24 @@ export class AIController {
       }
     }
 
+    // ---- projectiles heading our way: block (crouch for lows), jump over, or parry
+    for (const p of sim.state.projectiles) {
+      if (p.owner === f.idx || p.dead) continue;
+      const def = sim.projDef(p.owner, p.defId);
+      if (!def || def.inert) continue;
+      const dx = f.x - p.x;
+      const approaching = Math.sign(p.vx) === Math.sign(dx) || Math.abs(p.vx) < 0.5;
+      const close = Math.abs(dx) < 90 + Math.abs(p.vx) * (d.reaction * 0.5 + 6) && Math.abs(p.y - (f.y + 60)) < 220;
+      if (!approaching || !close || p.age < Math.min(d.reaction, 10)) continue;
+      if (this.r() > d.accuracy + 0.15) break;
+      const r = this.r();
+      if (r < 0.08 * d.accuracy && f.grounded && def.parryable !== false) return IN.P;
+      if (r > 0.9 && f.grounded && def.hit.guard !== 'low') return this.queue([this.maskFor(f, 8, [])], 4);
+      this.hold = away | (def.hit.guard === 'low' ? IN.DOWN : 0);
+      this.holdFrames = 12;
+      return this.hold;
+    }
+
     // ---- punish recovery
     if (seenMove && seen.state === 'move') {
       const fd = frameData(seenMove);
@@ -306,12 +325,22 @@ export class AIController {
       }
     }
 
-    // ---- zoning at range
-    if (dist > 260 && prof.zoning.length && this.r() < 0.05 + d.aggression * 0.04) {
+    // ---- zoning at range (with a cooldown so the CPU also moves and fights up close)
+    if (this.zoneCooldown > 0) this.zoneCooldown--;
+    if (dist > 260 && prof.zoning.length && this.zoneCooldown === 0 && this.r() < 0.05 + d.aggression * 0.04) {
       for (const id of prof.zoning) {
         const m = this.usable(sim, f, id);
-        if (m && (this.info(m).projectile || this.inRange(sim, f, this.observe(sim, opp), this.info(m)))) return this.press(f, m);
+        if (m && (this.info(m).projectile || this.inRange(sim, f, this.observe(sim, opp), this.info(m)))) {
+          this.zoneCooldown = 45 + Math.floor(this.r() * 60);
+          return this.press(f, m);
+        }
       }
+    }
+    // being zoned out: close the distance through the air
+    const incoming = sim.state.projectiles.some((p) => p.owner !== f.idx && Math.sign(p.vx) === Math.sign(f.x - p.x) && Math.abs(p.x - f.x) < 400);
+    if (incoming && dist > 300 && f.grounded && this.r() < 0.04 * (0.5 + d.aggression)) {
+      if (c.flight && f.resources.fuel > 50) return this.queue([this.maskFor(f, 9, []), this.maskFor(f, 9, []), this.maskFor(f, 9, ['D'])], 3);
+      return this.queue([this.maskFor(f, 9, [])], 4);
     }
 
     // ---- super when the opponent is in range and we have meter
