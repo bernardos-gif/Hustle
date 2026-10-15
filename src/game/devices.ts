@@ -27,6 +27,9 @@ export class Devices {
   menu: { key: MenuKey; player: number }[] = [];
   rawKeys: string[] = [];
   private padPrev: number[] = [0, 0];
+  /** Keys/pad buttons held while leaving a menu: ignored by gameplay until released. */
+  private muted = new Set<string>();
+  private padMuted: number[] = [0, 0];
   private padMenuPrev: number[] = [0, 0];
   settings: Settings;
   onAnyInput: (() => void) | null = null;
@@ -48,6 +51,7 @@ export class Devices {
     });
     window.addEventListener('keyup', (e) => {
       this.down.delete(e.code);
+      this.muted.delete(e.code);
     });
     window.addEventListener('blur', () => {
       this.down.clear();
@@ -87,13 +91,23 @@ export class Devices {
     let m = 0;
     const b = this.settings.bindings[player];
     for (const a of Object.keys(b) as Action[]) {
-      for (const k of b[a]) if (this.down.has(k) || this.latched.has(k)) m |= ACTION_BIT[a];
+      for (const k of b[a]) if ((this.down.has(k) || this.latched.has(k)) && !this.muted.has(k)) m |= ACTION_BIT[a];
     }
-    m |= this.samplePad(player);
+    const pad = this.samplePad(player);
+    this.padMuted[player] &= pad; // a muted pad button unmutes once released
+    m |= pad & ~this.padMuted[player];
     // opposite directions cancel out (SOCD neutral)
     if ((m & IN.LEFT) && (m & IN.RIGHT)) m &= ~(IN.LEFT | IN.RIGHT);
     if ((m & IN.UP) && (m & IN.DOWN)) m &= ~IN.DOWN;
     return m;
+  }
+
+  /** Call when gameplay starts or resumes from a menu: the keys used to navigate the menu
+   *  (J confirms, K backs out...) must not leak into the fight as attacks. */
+  muteHeld(): void {
+    for (const k of this.down) this.muted.add(k);
+    this.latched.clear();
+    this.padMuted = [this.samplePad(0), this.samplePad(1)];
   }
 
   /** Clears latched taps after a simulation step consumed them. */

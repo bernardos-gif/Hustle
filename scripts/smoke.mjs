@@ -106,6 +106,17 @@ try {
   // Training: keyboard-driven jab into the dummy
   await page.evaluate(() => window.__app.startMatch('training', 'vesper', 'solenne'));
   await page.waitForTimeout(300);
+  // menu keys must not leak into the fight: J confirms RESUME but must not throw a jab
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(100);
+  await page.keyboard.down('KeyJ');
+  let leaked = false;
+  for (let i = 0; i < 15; i++) {
+    leaked = leaked || (await page.evaluate(() => window.__app.sim.state.fighters[0].moveId === 'v_5L'));
+    await page.waitForTimeout(15);
+  }
+  await page.keyboard.up('KeyJ');
+  check(!(await page.evaluate(() => window.__app.paused)) && !leaked, 'resuming with J does not leak a jab into the fight');
   await page.evaluate(() => {
     const s = window.__app.sim;
     s.state.fighters[0].x = 650;

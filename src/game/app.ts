@@ -229,7 +229,11 @@ export class App {
         else this.drawVersus();
         break;
       case 'match':
-        this.matchInput(menu, raw);
+        {
+          const wasPaused = this.paused;
+          this.matchInput(menu, raw);
+          if (wasPaused && !this.paused) this.devices.muteHeld();
+        }
         if (!this.paused) this.advance(dt);
         else this.devices.endStep(); // taps made in menus must not leak into the fight
         this.drawMatch();
@@ -370,6 +374,7 @@ export class App {
     this.paused = false;
     this.overlay = null;
     this.loop.acc = 0;
+    this.devices.muteHeld();
     this.fx.clear();
     this.renderer.resetAnims();
     this.hud.reset();
@@ -751,6 +756,7 @@ export class App {
     this.renderer.resetAnims();
     this.hud.reset();
     if (this.sim) this.dummy.apply(this.sim, 1);
+    this.dummy.startPlayback(); // recorded playback restarts in sync with the new positions
     this.paused = false;
   }
 
@@ -926,8 +932,13 @@ export class App {
       this.renderer.resetAnims();
       this.hud.reset();
     };
+    // at the end of a replay, "play" starts it over instead of doing nothing
+    const toggle = () => {
+      if (!this.rpPlaying && rp.frame >= rp.length) seek(0);
+      this.rpPlaying = !this.rpPlaying;
+    };
     for (const k of raw) {
-      if (k === 'Space') this.rpPlaying = !this.rpPlaying;
+      if (k === 'Space') toggle();
       if (k === 'KeyB') this.rpBoxes = !this.rpBoxes;
       if (k === 'KeyV') this.rpHideHud = !this.rpHideHud;
       if (k === 'KeyR') seek(0);
@@ -936,7 +947,7 @@ export class App {
     }
     for (const m of menu) {
       if (m.key === 'pause' || m.key === 'back') this.go('title');
-      if (m.key === 'confirm') this.rpPlaying = !this.rpPlaying;
+      if (m.key === 'confirm') toggle();
       if (m.key === 'up') this.rpSpeed = Math.min(4, this.rpSpeed * 2);
       if (m.key === 'down') this.rpSpeed = Math.max(0.125, this.rpSpeed / 2);
       if (m.key === 'left') {

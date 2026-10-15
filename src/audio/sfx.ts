@@ -155,6 +155,30 @@ export class Sfx {
           break;
         case 'round':
           if (e.phase === 'fight') this.tone(0.4, 440, 880, 0.3, 'square');
+          else if (e.phase === 'timeout') this.tone(0.8, 330, 110, 0.45, 'square');
+          else if (e.phase === 'next') this.noise(0.3, 1500, 0.7, 0.25);
+          else if (e.phase === 'over') {
+            this.tone(0.25, 523, 523, 0.25, 'square');
+            this.tone(0.45, 659, 784, 0.22, 'square');
+            this.tone(0.9, 784, 1046, 0.2, 'triangle');
+          }
+          break;
+        case 'armor':
+          this.noise(0.18, 250, 1, 0.6, 'lowpass');
+          this.tone(0.15, 160, 120, 0.4, 'square');
+          break;
+        case 'reflect':
+          this.tone(0.2, 900, 1800, 0.25, 'triangle');
+          break;
+        case 'counterStance':
+          this.tone(0.3, 660, 1320, 0.3, 'square');
+          break;
+        case 'tech':
+          this.noise(0.08, 1500, 1, 0.2);
+          break;
+        case 'projClash':
+          this.noise(0.2, 3000, 2, 0.4);
+          this.tone(0.15, 1200, 900, 0.15, 'square');
           break;
         case 'install':
           if (e.on) this.tone(0.6, 100, 600, 0.4, 'sawtooth');
