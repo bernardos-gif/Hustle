@@ -7,33 +7,32 @@ import type { Sim } from '../combat/sim';
 import type { CharacterDef, FighterState } from '../combat/types';
 import { describeMask, dirVector } from '../core/input';
 import { Sim as SimClass } from '../combat/sim';
+import { THEME, bar, panel, pip, text, textWidth } from '../ui/kit';
+import { portrait } from './portrait';
 import type { Camera } from './renderer';
 import { VIEW_H, VIEW_W } from './renderer';
 
 type Ctx = CanvasRenderingContext2D;
 
-const FONT = 'system-ui, -apple-system, Segoe UI, sans-serif';
 
-function txt(ctx: Ctx, s: string, x: number, y: number, size: number, color: string, align: CanvasTextAlign = 'left', weight = 700): void {
-  ctx.font = `${weight} ${size}px ${FONT}`;
-  ctx.textAlign = align;
-  ctx.lineWidth = 4;
-  ctx.strokeStyle = 'rgba(0,0,0,0.8)';
-  ctx.strokeText(s, x, y);
-  ctx.fillStyle = color;
-  ctx.fillText(s, x, y);
+function txt(ctx: Ctx, s: string, x: number, y: number, size: number, color: string, align: CanvasTextAlign = 'left', _weight = 700): void {
+  // debug/training text uses the pixel font too (scale 1 for dense data, 2 for labels)
+  text(ctx, s, x, y - (size > 14 ? 14 : 7), { scale: size > 14 ? 2 : 1, color, align: align === 'center' ? 'center' : align === 'right' ? 'right' : 'left', shadow: '#05030c', shadowOffset: 1 });
 }
 
 export class Hud {
   private shownHp = [0, 0];
-  private comboShow: { hits: number; damage: number; scale: number; life: number }[] = [
-    { hits: 0, damage: 0, scale: 1, life: 0 },
-    { hits: 0, damage: 0, scale: 1, life: 0 },
+  private hitFlash = [0, 0];
+  private comboShow: { hits: number; damage: number; scale: number; life: number; pop: number }[] = [
+    { hits: 0, damage: 0, scale: 1, life: 0, pop: 0 },
+    { hits: 0, damage: 0, scale: 1, life: 0, pop: 0 },
   ];
   private bannerText = '';
   private bannerLife = 0;
+  private lastPhase = '';
+  private phaseAge = 0;
 
-  announce(text: string, frames = 70): void {
+  announce(text: string, frames = 90): void {
     this.bannerText = text;
     this.bannerLife = frames;
   }
@@ -43,16 +42,25 @@ export class Hud {
       if (this.shownHp[f.idx] < f.hp || this.shownHp[f.idx] === 0) this.shownHp[f.idx] = f.hp;
       // the red "damage" bar drains once the combo is over
       if (f.combo.hits === 0) this.shownHp[f.idx] = Math.max(f.hp, this.shownHp[f.idx] - 6);
+      if (f.lastDamageTaken > 0 && f.hitstop > 0) this.hitFlash[f.idx] = 6;
+      else if (this.hitFlash[f.idx] > 0) this.hitFlash[f.idx]--;
       const att = 1 - f.idx;
       const cs = this.comboShow[att];
       if (f.combo.hits >= 2) {
+        if (f.combo.hits !== cs.hits) cs.pop = 6;
         cs.hits = f.combo.hits;
         cs.damage = f.combo.damage;
         cs.scale = f.combo.scale;
         cs.life = 90;
       } else if (cs.life > 0) cs.life--;
+      if (cs.pop > 0) cs.pop--;
     }
     if (this.bannerLife > 0) this.bannerLife--;
+    const ph = sim.state.round.phase;
+    if (ph !== this.lastPhase) {
+      this.lastPhase = ph;
+      this.phaseAge = 0;
+    } else this.phaseAge++;
   }
 
   reset(): void {
@@ -62,141 +70,136 @@ export class Hud {
 
   draw(ctx: Ctx, sim: Sim, chars: CharacterDef[], labels: [string, string]): void {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.imageSmoothingEnabled = false;
     const s = sim.state;
     for (const f of s.fighters) this.drawSide(ctx, sim, f, chars[f.idx], labels[f.idx]);
     // timer
-    const t = s.settings.training ? '∞' : String(Math.max(0, Math.ceil(s.round.timer / FPS)));
-    ctx.fillStyle = 'rgba(10,8,25,0.85)';
-    ctx.fillRect(VIEW_W / 2 - 42, 14, 84, 58);
-    txt(ctx, t, VIEW_W / 2, 58, 40, '#fff', 'center', 900);
-    // round pips
+    const cx = VIEW_W / 2;
+    panel(ctx, cx - 54, 10, 108, 78, { fill: THEME.bg0 });
+    const secs = Math.max(0, Math.ceil(s.round.timer / FPS));
+    const t = s.settings.training ? '--' : String(secs).padStart(2, '0');
+    const urgent = !s.settings.training && secs <= 10 && s.round.phase === 'fight';
+    text(ctx, t, cx, 22, { scale: 6, align: 'center', color: urgent && Math.floor(s.frame / 15) % 2 ? THEME.red : THEME.text });
+    // round wins
     for (let p = 0; p < 2; p++) {
       for (let i = 0; i < CFG.roundsToWin; i++) {
-        const x = VIEW_W / 2 + (p === 0 ? -60 - i * 18 : 60 + i * 18);
-        ctx.fillStyle = s.round.wins[p] > i ? '#ffd60a' : '#33294d';
-        ctx.beginPath();
-        ctx.arc(x, 84, 6, 0, Math.PI * 2);
-        ctx.fill();
+        const x = cx + (p === 0 ? -26 - i * 16 : 18 + i * 16);
+        ctx.fillStyle = THEME.border;
+        ctx.fillRect(x - 1, 95, 10, 10);
+        ctx.fillStyle = s.round.wins[p] > i ? THEME.gold : '#33294d';
+        ctx.fillRect(x, 96, 8, 8);
       }
     }
     // combo counters
     for (let p = 0; p < 2; p++) {
       const cs = this.comboShow[p];
       if (cs.life <= 0) continue;
-      const x = p === 0 ? 360 : VIEW_W - 360;
+      const x = p === 0 ? 40 : VIEW_W - 40;
       const al = p === 0 ? 'left' : 'right';
-      ctx.globalAlpha = Math.min(1, cs.life / 20);
-      txt(ctx, `${cs.hits}`, x, 170, 60, '#ffd60a', al, 900);
-      txt(ctx, 'HITS', x + (p === 0 ? 1 : -1) * (cs.hits >= 10 ? 74 : 40), 170, 22, '#fff', al, 900);
-      txt(ctx, `${cs.damage} DMG`, x, 198, 20, '#ff4d6d', al, 800);
-      txt(ctx, `scale ${(cs.scale * 100).toFixed(0)}%`, x, 220, 14, '#bbb', al, 600);
-      ctx.globalAlpha = 1;
+      const a = Math.min(1, cs.life / 20);
+      const sc = 8 + (cs.pop > 3 ? 2 : cs.pop > 0 ? 1 : 0);
+      const w = text(ctx, `${cs.hits}`, x, 150 - (sc - 8) * 3, { scale: sc, color: THEME.gold, align: al, alpha: a, shadow: '#7a2c00' });
+      text(ctx, 'HITS', p === 0 ? x + w + 10 : x - w - 10, 178, { scale: 3, color: THEME.text, align: al, alpha: a });
+      text(ctx, `${cs.damage} DMG`, x, 214, { scale: 3, color: THEME.red, align: al, alpha: a });
+      text(ctx, `SCALE ${(cs.scale * 100).toFixed(0)}%`, x, 242, { scale: 2, color: THEME.dim, align: al, alpha: a });
     }
     // round announcements
-    if (s.round.phase === 'intro') txt(ctx, s.round.phaseFrames < 40 ? `ROUND ${s.round.number}` : 'FIGHT!', VIEW_W / 2, 330, 72, '#fff', 'center', 900);
-    if (s.round.phase === 'fight' && s.round.phaseFrames < 30 && !s.settings.training) txt(ctx, 'FIGHT!', VIEW_W / 2, 330, 72, '#ffd60a', 'center', 900);
+    const age = this.phaseAge;
+    const slam = (str: string, color: string, base: number) => {
+      const sc = Math.max(base, base + 6 - age);
+      text(ctx, str, cx, 300, { scale: sc, align: 'center', valign: 'middle', color, shadow: '#000000' });
+    };
+    if (s.round.phase === 'intro') {
+      if (s.round.phaseFrames < 40) {
+        const x = Math.min(cx, -200 + s.round.phaseFrames * 40);
+        text(ctx, `ROUND ${s.round.number}`, x, 300, { scale: 8, align: 'center', valign: 'middle', color: THEME.text });
+      } else text(ctx, 'READY', cx, 300, { scale: 8, align: 'center', valign: 'middle', color: THEME.cyan });
+    }
+    if (s.round.phase === 'fight' && s.round.phaseFrames < 40 && !s.settings.training) slam('FIGHT!', THEME.gold, 12);
     if (s.round.phase === 'ko') {
       const timeout = s.fighters.every((f) => f.hp > 0);
-      txt(ctx, timeout ? 'TIME' : 'K.O.', VIEW_W / 2, 330, 96, '#ff4d6d', 'center', 900);
-      if (s.round.phaseFrames > 60) txt(ctx, s.round.winner < 0 ? 'DRAW' : `${labels[s.round.winner]} WINS THE ROUND`, VIEW_W / 2, 380, 28, '#fff', 'center', 800);
+      slam(timeout ? 'TIME' : 'K.O.', THEME.red, 14);
+      if (s.round.phaseFrames > 60) text(ctx, s.round.winner < 0 ? 'DRAW' : `${labels[s.round.winner]} WINS THE ROUND`, cx, 380, { scale: 3, align: 'center', color: THEME.text });
     }
-    if (s.round.phase === 'over') {
-      txt(ctx, s.round.matchWinner < 0 ? 'DRAW GAME' : `${labels[s.round.matchWinner]} WINS!`, VIEW_W / 2, 320, 64, '#ffd60a', 'center', 900);
+    if (s.round.phase === 'over') text(ctx, s.round.matchWinner < 0 ? 'DRAW GAME' : `${labels[s.round.matchWinner]} WINS!`, cx, 250, { scale: 7, align: 'center', color: THEME.gold, shadow: '#7a2c00' });
+    if (this.bannerLife > 0) {
+      const bw = textWidth(this.bannerText, 2) + 40;
+      panel(ctx, cx - bw / 2, 118, bw, 34, { fill: THEME.bg0, alpha: Math.min(1, this.bannerLife / 10) });
+      text(ctx, this.bannerText, cx, 128, { scale: 2, align: 'center', color: '#80ffdb', alpha: Math.min(1, this.bannerLife / 10) });
     }
-    if (this.bannerLife > 0) txt(ctx, this.bannerText, VIEW_W / 2, 140, 22, '#80ffdb', 'center', 800);
   }
 
   private drawSide(ctx: Ctx, sim: Sim, f: FighterState, c: CharacterDef, label: string): void {
     const left = f.idx === 0;
-    const W = 500;
-    const x0 = left ? 30 : VIEW_W - 30 - W;
-    const dir = left ? 1 : -1;
+    const accent = left ? THEME.p1 : THEME.p2;
+    const pw = 86;
+    const W = 470;
+    const px = left ? 16 : VIEW_W - 16 - pw;
+    // portrait
+    panel(ctx, px, 10, pw, 86, { fill: '#120b26', edge: accent, cut: 8 });
+    const img = portrait(c, left ? 1 : -1);
+    ctx.drawImage(img, px + 9, 18, 68, 68);
+    // name plate
+    const bx = left ? px + pw + 8 : px - 8 - W;
+    text(ctx, c.name.toUpperCase(), left ? bx : bx + W, 12, { scale: 3, color: THEME.text, align: left ? 'left' : 'right' });
+    text(ctx, label, left ? bx + textWidth(c.name.toUpperCase(), 3) + 12 : bx + W - textWidth(c.name.toUpperCase(), 3) - 12, 18, { scale: 2, color: accent, align: left ? 'left' : 'right' });
     // health
-    ctx.fillStyle = 'rgba(10,8,25,0.85)';
-    ctx.fillRect(x0 - 4, 20, W + 8, 34);
-    const hpw = (f.hp / f.maxHp) * W;
-    const redw = (Math.max(f.hp, this.shownHp[f.idx]) / f.maxHp) * W;
-    ctx.fillStyle = '#e63946';
-    ctx.fillRect(left ? x0 + W - redw : x0, 24, redw, 26);
-    const g = ctx.createLinearGradient(0, 24, 0, 50);
-    const low = f.hp < f.maxHp * 0.3;
-    g.addColorStop(0, low ? '#ffb703' : '#80ffdb');
-    g.addColorStop(1, low ? '#fb8500' : '#06d6a0');
-    ctx.fillStyle = g;
-    ctx.fillRect(left ? x0 + W - hpw : x0, 24, hpw, 26);
-    txt(ctx, `${label}  ${c.name.toUpperCase()}`, left ? x0 : x0 + W, 78, 18, '#fff', left ? 'left' : 'right', 900);
-    txt(ctx, `${Math.ceil(f.hp)}`, left ? x0 + W - 6 : x0 + 6, 44, 16, '#0b0a14', left ? 'right' : 'left', 900);
-
-    // burst gauge
-    const bw = 180;
-    const bx = left ? x0 + W - bw : x0;
-    ctx.fillStyle = '#1b1530';
-    ctx.fillRect(bx, 60, bw, 9);
+    const ratio = f.hp / f.maxHp;
+    const hpCol = this.hitFlash[f.idx] > 3 ? '#ffffff' : ratio < 0.25 ? THEME.red : ratio < 0.5 ? THEME.gold : THEME.green;
+    bar(ctx, bx, 40, W, 24, ratio, hpCol, { rtl: left, trail: Math.max(f.hp, this.shownHp[f.idx]) / f.maxHp, trailColor: '#e63946', segments: 10 });
+    text(ctx, `${Math.ceil(f.hp)}`, left ? bx + 8 : bx + W - 8, 46, { scale: 2, color: '#0b0718', shadow: null, align: left ? 'left' : 'right' });
+    // burst
     const full = f.burst >= CFG.burst.max;
-    ctx.fillStyle = full ? (Math.floor(sim.state.frame / 8) % 2 ? '#ffffff' : c.palette.aura) : '#6c5ba7';
-    const bfill = (f.burst / CFG.burst.max) * bw;
-    ctx.fillRect(left ? bx + bw - bfill : bx, 60, bfill, 9);
-    txt(ctx, full ? 'BURST READY' : 'BURST', left ? bx - 6 : bx + bw + 6, 69, 11, full ? '#fff' : '#9a8cc7', left ? 'right' : 'left', 800);
+    const bw = 190;
+    const bbx = left ? bx + W - bw : bx;
+    bar(ctx, bbx, 74, bw, 8, f.burst / CFG.burst.max, full ? (Math.floor(sim.state.frame / 8) % 2 ? '#ffffff' : c.palette.aura) : '#6c5ba7', { rtl: left });
+    text(ctx, full ? 'BURST READY' : 'BURST', left ? bbx - 10 : bbx + bw + 10, 72, { scale: 2, color: full ? THEME.text : THEME.faint, align: left ? 'right' : 'left' });
 
-    // super meter (bottom)
-    const mx = left ? 30 : VIEW_W - 30 - 360;
-    const my = VIEW_H - 46;
+    // bottom: super meter
+    const mw = 330;
+    const mx = left ? 24 : VIEW_W - 24 - mw;
+    const my = VIEW_H - 40;
     const lvl = Math.floor(f.meter / CFG.meter.perBar);
-    ctx.fillStyle = 'rgba(10,8,25,0.85)';
-    ctx.fillRect(mx - 4, my - 4, 368, 26);
+    const part = (f.meter % CFG.meter.perBar) / CFG.meter.perBar;
     for (let i = 0; i < 3; i++) {
-      const sx = left ? mx + i * 120 : mx + (2 - i) * 120;
-      const v = Math.max(0, Math.min(1, (f.meter - i * CFG.meter.perBar) / CFG.meter.perBar));
-      ctx.fillStyle = '#251d40';
-      ctx.fillRect(sx, my, 116, 18);
-      ctx.fillStyle = v >= 1 ? '#4cc9f0' : '#3a86ff88';
-      ctx.fillRect(left ? sx : sx + 116 - 116 * v, my, 116 * v, 18);
+      const segW = (mw - 16) / 3;
+      const sx = left ? mx + i * (segW + 8) : mx + (2 - i) * (segW + 8);
+      const v = i < lvl ? 1 : i === lvl ? part : 0;
+      bar(ctx, sx, my, segW, 14, v, i < lvl ? THEME.cyan : '#3a6fd8', { rtl: !left });
     }
-    txt(ctx, `${lvl}`, left ? mx + 380 : mx - 18, my + 18, 30, lvl > 0 ? '#4cc9f0' : '#555', 'center', 900);
-    txt(ctx, 'SUPER', left ? mx : mx + 360, my - 8, 12, '#9ad1ff', left ? 'left' : 'right', 800);
+    const lx = left ? mx + mw + 30 : mx - 30;
+    panel(ctx, lx - 22, my - 22, 44, 44, { fill: THEME.bg0, edge: lvl > 0 ? THEME.cyan : THEME.edge, cut: 6 });
+    text(ctx, `${lvl}`, lx, my + 1, { scale: 4, align: 'center', valign: 'middle', color: lvl > 0 ? THEME.cyan : THEME.faint });
+    text(ctx, 'SUPER', left ? mx : mx + mw, my - 18, { scale: 2, color: '#9ad1ff', align: left ? 'left' : 'right' });
 
-    // air options + feints + char resources
-    let rx = left ? 30 : VIEW_W - 30;
-    let ry = VIEW_H - 74;
-    const pip = (n: number, max: number, color: string, labelText: string) => {
-      txt(ctx, labelText, rx, ry + 5, 11, '#ccc', left ? 'left' : 'right', 800);
-      const lw = 52;
-      for (let i = 0; i < max; i++) {
-        const px = rx + dir * (lw + i * 16);
-        ctx.fillStyle = i < n ? color : '#2b2245';
-        ctx.beginPath();
-        ctx.moveTo(px, ry - 6);
-        ctx.lineTo(px + 6, ry);
-        ctx.lineTo(px, ry + 6);
-        ctx.lineTo(px - 6, ry);
-        ctx.fill();
-      }
-      rx += dir * (lw + max * 16 + 20);
+    // air options, feints and character resources
+    let rx = left ? 24 : VIEW_W - 24;
+    const ry = VIEW_H - 84;
+    const dir = left ? 1 : -1;
+    const pips = (n: number, max: number, color: string, name: string) => {
+      const lw = text(ctx, name, rx, ry - 6, { scale: 2, color: THEME.dim, align: left ? 'left' : 'right' });
+      for (let i = 0; i < max; i++) pip(ctx, rx + dir * (lw + 14 + i * 16), ry + 1, i < n, color);
+      rx += dir * (lw + 14 + max * 16 + 16);
     };
-    if (c.maxAirOptions > 0) pip(f.airOptions, c.maxAirOptions, '#80ffdb', 'AIR');
-    pip(f.feints, CFG.feint.max, '#e9c46a', 'FEINT');
+    if (c.maxAirOptions > 0) pips(f.airOptions, c.maxAirOptions, '#80ffdb', 'AIR');
+    pips(f.feints, CFG.feint.max, '#e9c46a', 'FEINT');
     for (const r of c.resources) {
       const v = f.resources[r.name];
-      if (r.display === 'pips') pip(Math.floor(v), r.max, r.color, r.label);
+      if (r.display === 'pips') pips(Math.floor(v), r.max, r.color, r.label);
       else {
-        txt(ctx, r.label, rx, ry + 5, 11, '#ccc', left ? 'left' : 'right', 800);
+        const lw = text(ctx, r.label, rx, ry - 6, { scale: 2, color: THEME.dim, align: left ? 'left' : 'right' });
         const w = 110;
-        const bx2 = left ? rx + 44 : rx - 44 - w;
-        ctx.fillStyle = '#2b2245';
-        ctx.fillRect(bx2, ry - 5, w, 10);
-        ctx.fillStyle = r.color;
-        const fw = (v / r.max) * w;
-        ctx.fillRect(left ? bx2 : bx2 + w - fw, ry - 5, fw, 10);
-        rx += dir * (44 + w + 20);
+        const x0 = left ? rx + lw + 12 : rx - lw - 12 - w;
+        bar(ctx, x0, ry - 4, w, 10, v / r.max, r.color, { rtl: !left });
+        rx += dir * (lw + 12 + w + 16);
       }
     }
-    // status tags
     const tags: string[] = [];
-    if (f.install) tags.push(`OVERDRIVE ${(f.install.frames / FPS).toFixed(1)}s`);
+    if (f.install) tags.push(`OVERDRIVE ${(f.install.frames / FPS).toFixed(1)}S`);
     if (f.stance) tags.push('DRAW STANCE');
     if (f.flying) tags.push('FLIGHT');
     if (f.burstPunishable > 0 && f.moveId === 'burst') tags.push('BURST RECOVERY');
-    if (tags.length) txt(ctx, tags.join('  ·  '), left ? 30 : VIEW_W - 30, VIEW_H - 98, 14, '#ffd60a', left ? 'left' : 'right', 900);
+    if (tags.length) text(ctx, tags.join(' · '), left ? 24 : VIEW_W - 24, VIEW_H - 118, { scale: 2, color: THEME.gold, align: left ? 'left' : 'right' });
   }
 }
 
@@ -285,8 +288,7 @@ export function drawDebug(ctx: Ctx, sim: Sim, cam: Camera, chars: CharacterDef[]
       const left = f.idx === 0;
       const x = left ? 20 : VIEW_W - 340;
       let y = 120;
-      ctx.fillStyle = 'rgba(5,5,15,0.78)';
-      ctx.fillRect(x, y, 320, 238);
+      panel(ctx, x, y - 6, 320, 248, { fill: 'rgba(14,9,30,0.88)', cut: 5 });
       const line = (t: string, color = '#ddd') => {
         txt(ctx, t, x + 10, (y += 17), 13, color, 'left', 600);
       };

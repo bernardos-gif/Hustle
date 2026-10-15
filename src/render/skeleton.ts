@@ -76,7 +76,27 @@ export function buildJoints(f: FighterState, c: CharacterDef, pose: Pose): Joint
     const dy = f.y + 4 - low;
     for (const k of Object.keys(j) as (keyof Joints)[]) if (k !== 'headR') (j[k] as Vec).y += dy;
   }
+  // squash & stretch around the feet: shorter + wider, or taller + thinner
+  const sq = pose.squash ?? 1;
+  if (Math.abs(sq - 1) > 0.001) {
+    const sx = 1 / Math.sqrt(sq);
+    for (const k of Object.keys(j) as (keyof Joints)[]) {
+      if (k === 'headR') continue;
+      const p = j[k] as Vec;
+      p.x = f.x + (p.x - f.x) * sx;
+      p.y = f.y + (p.y - f.y) * sq;
+    }
+  }
   return j;
+}
+
+/** Tip of Vesper's rapier (or the front hand for everyone else). */
+export function weaponTip(j: Joints, charId: string): Vec {
+  if (charId !== 'vesper') return j.handF;
+  const dx = j.handF.x - j.elbowF.x;
+  const dy = j.handF.y - j.elbowF.y;
+  const L = Math.hypot(dx, dy) || 1;
+  return { x: j.handF.x + (dx / L) * 82, y: j.handF.y + (dy / L) * 82 };
 }
 
 export interface DrawStyle {
@@ -107,7 +127,7 @@ function limb(ctx: Ctx, a: Vec, b: Vec, c: Vec, w: number, color: string, outlin
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.strokeStyle = outline;
-  ctx.lineWidth = w + 4;
+  ctx.lineWidth = w + 2;
   ctx.beginPath();
   ctx.moveTo(a.x, a.y);
   ctx.lineTo(b.x, b.y);
@@ -175,7 +195,7 @@ export function drawFighter(ctx: Ctx, f: FighterState, c: CharacterDef, j: Joint
   // torso
   ctx.lineCap = 'round';
   const tw = heavy ? 30 : c.id === 'riot' ? 18 : 16;
-  line(ctx, j.hip, j.neck, tw + 4, O);
+  line(ctx, j.hip, j.neck, tw + 2, O);
   line(ctx, j.hip, j.neck, tw, P);
   // belt / sash
   const mid = { x: (j.hip.x * 3 + j.neck.x) / 4, y: (j.hip.y * 3 + j.neck.y) / 4 };

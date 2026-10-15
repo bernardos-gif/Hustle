@@ -67,6 +67,7 @@ export class Devices {
     if (code === 'Enter' || code === 'NumpadEnter') return repeat ? undefined : push('confirm', 0);
     if (code === 'Backspace') return repeat ? undefined : push('back', 0);
     if (code === 'Tab') return repeat ? undefined : push('tab', 0);
+    const before = this.menu.length;
     for (let p = 0; p < 2; p++) {
       const b = this.settings.bindings[p];
       if (b.up.includes(code)) push('up', p);
@@ -76,6 +77,9 @@ export class Devices {
       else if (!repeat && b.L.includes(code)) push('confirm', p);
       else if (!repeat && (b.M.includes(code) || b.P.includes(code))) push('back', p);
     }
+    // arrow keys always navigate menus, even if they were rebound away from directions
+    const arrows: Record<string, MenuKey> = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
+    if (this.menu.length === before && arrows[code]) push(arrows[code], 0);
   }
 
   /** Samples one player's input for the next simulation step. */

@@ -131,6 +131,35 @@ including the universal ones; the in-game **Move List** reads directly from the 
     flight, stance, low HP, heat, attack…). Color, size, spawn rate, lifetime, speed, region,
     trigger and shape are all editable.
 
+## Presentation
+
+- **Pixel rendering**: the stage, fighters, projectiles and effects render at 1/3 resolution
+  and are scaled up crisply. Fighters get hard alpha plus a 1-px outline, flash white when
+  hit, flicker in their aura colour while invulnerable, and shake during hitstop.
+- **Animation**:
+  - Per-character fighting stances.
+  - Stepped 8-frame walk and run cycles and a 4-frame idle (Riot bounces on his toes).
+  - Squash and stretch on jump, landing and the first strike frame.
+  - Anticipation easing on wind-ups and an overshooting follow-through in recovery.
+  - Front flips on double jumps, alternating hit reactions, tumbling launches and knockdown
+    bounces.
+  - Motion smears behind the striking limb or blade.
+  - Secondary cloth motion: Mirage's scarf, Vesper's coat tails and plume, Riot's headband,
+    Solenne's sash and hood, Bastion's cable.
+  - P2 wears an alternate palette in mirror matches.
+- **UI**:
+  - A built-in pixel font (no external assets) and bevelled pixel panels.
+  - Full mouse support (hover, click, wheel), plus keyboard and gamepad navigation.
+  - A live CPU-vs-CPU fight behind the title menu, block-wipe screen transitions, and a VS
+    splash before each match.
+  - Character cards with animated sprites and stat bars.
+  - A move list with a detail pane and visual frame bar.
+  - A pixel HUD with portraits, segmented bars and a popping combo counter.
+- **Controls in battle**: Pause → **Controls** opens the full remapping panel over the frozen
+  match. It has two key slots per action for each player. Click or press Enter to rebind,
+  Delete clears the 2nd key, conflicts are resolved automatically (with a notice), and
+  changes apply immediately and are saved.
+
 ## Architecture
 
 ```
@@ -180,9 +209,10 @@ scripts/smoke.mjs  real-browser smoke test (Playwright)
 - **No online multiplayer.** It has not been implemented or tested; only local versus is
   available. The simulation is deterministic and supports snapshot/restore, which is the
   foundation rollback netcode would need, but no networking code exists.
-- **Art** is procedural vector stick figures (an intentional nod to the genre). Poses are keyed
-  to each move's real startup/active/recovery frames, but they are blended keyframes, not
-  hand-animated sprites.
+- **Art** is procedural pixel art: fighters are drawn from a skeleton, rendered into a
+  low-resolution buffer (3× pixels) with hard edges and a 1-px sprite outline, then upscaled
+  with nearest-neighbour filtering. Animation is posed from each move's real
+  startup/active/recovery frames, not hand-drawn sprite sheets.
 - **Sound** is synthesized at runtime. There is no music.
 - **Balance** has had automated sanity passes (AI-vs-AI matches, anti-infinite tests) but no
   human playtesting at a competitive level.

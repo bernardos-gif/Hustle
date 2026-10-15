@@ -36,7 +36,7 @@ try {
   await page.keyboard.press('Enter');
   await page.waitForTimeout(100);
   await page.keyboard.press('Enter');
-  await page.waitForTimeout(1800);
+  await page.waitForTimeout(3200); // VS splash + round intro
   const menuMatch = await page.evaluate(() => ({ screen: window.__app.screen, chars: window.__app.sim?.charIds, phase: window.__app.sim?.state.round.phase }));
   check(menuMatch.screen === 'match' && menuMatch.chars?.[0] === 'mirage', `menus start a CPU match via keyboard (${JSON.stringify(menuMatch)})`);
   // P1 walks with D and the fighter actually moves
@@ -54,6 +54,42 @@ try {
   await page.waitForTimeout(300);
   const f1 = await page.evaluate(() => window.__app.sim.state.frame);
   check(f0 === f1, 'simulation is frozen while paused');
+  // Pause menu -> Controls -> remap P1 "Light" to Y, verify, then use it in the fight
+  const ctlIdx = await page.evaluate(() => window.__app['pauseItems']().findIndex((i) => i.label === 'CONTROLS'));
+  for (let i = 0; i < ctlIdx; i++) await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(150);
+  check(await page.evaluate(() => window.__app.overlay === 'controls'), 'pause menu opens the controls panel');
+  for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowDown'); // row 4 = Light
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(80);
+  await page.keyboard.press('KeyY');
+  await page.waitForTimeout(80);
+  const light = await page.evaluate(() => window.__app.settings.bindings[0].L);
+  check(light[0] === 'KeyY', `remapped P1 Light from the pause menu (${JSON.stringify(light)})`);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(100);
+  check(await page.evaluate(() => window.__app.overlay === null && window.__app.paused), 'Esc returns from controls to the pause menu');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(150);
+  await page.evaluate(() => {
+    const s = window.__app.sim;
+    s.state.fighters[1].x = s.state.fighters[0].x + 600; // keep the CPU out of the way
+    window.__app.ais[1] = null;
+  });
+  await page.waitForTimeout(400);
+  await page.keyboard.press('KeyY');
+  let jab = false;
+  for (let i = 0; i < 20 && !jab; i++) {
+    jab = await page.evaluate(() => window.__app.sim.state.fighters[0].moveId === 'm_5L');
+    await page.waitForTimeout(15);
+  }
+  check(jab, 'the remapped key performs Light in the live match');
+  await page.evaluate(() => {
+    window.__app.settings.bindings[0].L = ['KeyJ'];
+  });
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(100);
   await page.keyboard.press('Escape');
   await page.waitForTimeout(200);
   check(!(await page.evaluate(() => window.__app.paused)), 'Esc resumes');

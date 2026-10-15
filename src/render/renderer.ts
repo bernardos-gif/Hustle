@@ -1,15 +1,24 @@
 // Draws the stage, fighters, projectiles and effects with a dynamic camera.
+// The world is rendered into a low-resolution buffer and scaled up with nearest-neighbour
+// filtering, and fighters go through a pixel pass (hard alpha + 1px sprite outline), which gives
+// the whole battle a crisp pixel-art look while hitboxes stay at full simulation precision.
 
 import { CFG } from '../combat/config';
 import type { Sim } from '../combat/sim';
-import type { CharacterDef, FighterState, ProjectileState } from '../combat/types';
+import type { CharacterDef, CombatEvent, FighterState, ProjectileState } from '../combat/types';
+import { pixelText } from '../ui/pixelfont';
+import { FighterAnim, drawChains, drawSmear } from './anim';
 import { Effects } from './effects';
-import { computePose } from './poses';
-import { buildJoints, drawFighter, type Joints } from './skeleton';
+import { drawFighter, shade, type Joints } from './skeleton';
 
 export const VIEW_W = 1280;
 export const VIEW_H = 720;
 export const GROUND_Y = 620;
+/** Size of one world "pixel" on screen. */
+export const PX = 3;
+export const LOW_W = Math.ceil(VIEW_W / PX);
+export const LOW_H = Math.ceil(VIEW_H / PX);
+const OUTLINE: [number, number, number] = [11, 7, 20];
 
 export class Camera {
   x = 700;
@@ -40,86 +49,193 @@ export class Camera {
     return { x: (x - this.x) * this.zoom + VIEW_W / 2, y: GROUND_Y - (y - this.y) * this.zoom };
   }
 
-  apply(ctx: CanvasRenderingContext2D, sx: number, sy: number): void {
-    ctx.setTransform(this.zoom, 0, 0, -this.zoom, VIEW_W / 2 - this.x * this.zoom + sx, GROUND_Y + this.y * this.zoom + sy);
+  /** Applies the world transform; `k` scales to a lower-resolution buffer. Translation snaps to
+   *  whole buffer pixels so the pixel art does not shimmer while the camera moves. */
+  apply(ctx: CanvasRenderingContext2D, sx: number, sy: number, k = 1): void {
+    const z = this.zoom * k;
+    ctx.setTransform(z, 0, 0, -z, Math.round((VIEW_W / 2 - this.x * this.zoom + sx) * k), Math.round((GROUND_Y + this.y * this.zoom + sy) * k));
   }
 }
 
-export interface RenderOptions {
-  hideHud: boolean;
-  boxes: boolean;
+function makeCanvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext('2d', { willReadFrequently: true })!;
+  return [c, ctx];
+}
+
+/** Hard-edges every sprite on the canvas (no half-transparent pixels) and adds a 1px outline. */
+export function pixelate(ctx: CanvasRenderingContext2D, w: number, h: number, outline: [number, number, number] = OUTLINE): void {
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  const n = w * h;
+  const solid = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    const a = d[i * 4 + 3];
+    if (a >= 100) {
+      solid[i] = 1;
+      d[i * 4 + 3] = 255;
+    } else d[i * 4 + 3] = 0;
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (solid[i]) continue;
+      if ((x > 0 && solid[i - 1]) || (x < w - 1 && solid[i + 1]) || (y > 0 && solid[i - w]) || (y < h - 1 && solid[i + w])) {
+        d[i * 4] = outline[0];
+        d[i * 4 + 1] = outline[1];
+        d[i * 4 + 2] = outline[2];
+        d[i * 4 + 3] = 255;
+      }
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+/** Small deterministic PRNG for stable background layouts. */
+function seeded(seed: number): () => number {
+  let s = seed;
+  return () => {
+    s = (s * 1103515245 + 12345) & 0x7fffffff;
+    return s / 0x7fffffff;
+  };
+}
+
+interface Building {
+  x: number;
+  w: number;
+  h: number;
+  lights: number[];
+  sign: number;
 }
 
 export class Renderer {
   ctx: CanvasRenderingContext2D;
   camera = new Camera();
   fx: Effects;
-  joints: (Joints | null)[] = [null, null];
-  private hitFlash = [0, 0];
-  private stars: { x: number; y: number; s: number }[] = [];
+  anims: [FighterAnim, FighterAnim] = [new FighterAnim(), new FighterAnim()];
+  private world: HTMLCanvasElement;
+  wctx: CanvasRenderingContext2D;
+  private sprites: HTMLCanvasElement;
+  private sctx: CanvasRenderingContext2D;
+  private stars: { x: number; y: number; b: number }[] = [];
+  private far: Building[] = [];
+  private near: Building[] = [];
 
   constructor(ctx: CanvasRenderingContext2D, fx: Effects) {
     this.ctx = ctx;
     this.fx = fx;
-    for (let i = 0; i < 90; i++) this.stars.push({ x: Math.random() * 2400 - 500, y: 200 + Math.random() * 700, s: Math.random() * 2 + 0.5 });
+    [this.world, this.wctx] = makeCanvas(LOW_W, LOW_H);
+    [this.sprites, this.sctx] = makeCanvas(LOW_W, LOW_H);
+    const r = seeded(7);
+    for (let i = 0; i < 70; i++) this.stars.push({ x: Math.floor(r() * 700), y: Math.floor(r() * 150), b: r() });
+    let x = 0;
+    while (x < 900) {
+      const w = 14 + Math.floor(r() * 22);
+      this.far.push({ x, w, h: 30 + Math.floor(r() * 70), lights: Array.from({ length: 12 }, () => (r() < 0.3 ? 1 : 0)), sign: -1 });
+      x += w + 2 + Math.floor(r() * 6);
+    }
+    x = 0;
+    while (x < 1100) {
+      const w = 22 + Math.floor(r() * 30);
+      this.near.push({ x, w, h: 22 + Math.floor(r() * 50), lights: Array.from({ length: 16 }, () => (r() < 0.25 ? 1 : 0)), sign: r() < 0.35 ? Math.floor(r() * 3) : -1 });
+      x += w + 6 + Math.floor(r() * 14);
+    }
+  }
+
+  get joints(): (Joints | null)[] {
+    return [this.anims[0].joints, this.anims[1].joints];
+  }
+
+  resetAnims(): void {
+    for (const a of this.anims) a.reset();
   }
 
   /** Called once per simulation frame. */
-  tick(sim: Sim, chars: CharacterDef[], events: ReturnType<Sim['step']>): void {
+  tick(sim: Sim, chars: CharacterDef[], events: CombatEvent[]): void {
     for (const f of sim.state.fighters) {
-      const j = buildJoints(f, chars[f.idx], computePose(sim, f, sim.state.frame));
-      this.joints[f.idx] = j;
+      const j = this.anims[f.idx].tick(sim, f, chars[f.idx], events);
       this.fx.tickFighter(f, j, chars[f.idx], sim);
     }
-    for (const e of events) if (e.type === 'hit') this.hitFlash[e.victim] = 1;
     this.fx.handleEvents(events, sim, chars);
     this.fx.tickProjectiles(sim);
     this.fx.update();
-    this.hitFlash = this.hitFlash.map((v) => v * 0.7);
   }
 
   draw(sim: Sim, chars: CharacterDef[], time: number): void {
     const ctx = this.ctx;
+    const w = this.wctx;
+    const k = 1 / PX;
     this.camera.follow(sim, this.fx.zoomPunch);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    for (const f of sim.state.fighters) if (!this.anims[f.idx].joints) this.anims[f.idx].tick(sim, f, chars[f.idx], []);
+    w.setTransform(1, 0, 0, 1, 0, 0);
     this.drawBackground(time);
-    this.camera.apply(ctx, this.fx.shakeX, this.fx.shakeY);
+    this.camera.apply(w, this.fx.shakeX, this.fx.shakeY, k);
     this.drawStage();
-    // afterimages
+    // shadows
+    for (const f of sim.state.fighters) {
+      const c = chars[f.idx];
+      w.fillStyle = 'rgba(5,3,15,0.45)';
+      w.beginPath();
+      w.ellipse(f.x, 1, c.width * 0.8 * Math.max(0.4, 1 - f.y / 500), 7, 0, 0, Math.PI * 2);
+      w.fill();
+    }
+    // afterimages keep their translucency, so they go straight onto the world layer
     for (const a of this.fx.afterimages) {
       const c = chars.find((x) => x.id === a.charId);
       if (!c) continue;
       const f = { facing: a.facing, charId: a.charId, stance: null, state: 'idle', flying: false } as unknown as FighterState;
-      drawFighter(ctx, f, c, a.joints, { primary: '', secondary: '', accent: '', skin: '', outline: '', alpha: (a.life / a.max) * 0.45, flat: a.color }, time);
+      drawFighter(w, f, c, a.joints, { primary: '', secondary: '', accent: '', skin: '', outline: '', alpha: (a.life / a.max) * 0.5, flat: a.color }, time);
     }
-    // super darken behind fighters
     if (this.fx.darken > 0) {
-      ctx.save();
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.fillStyle = `rgba(0,0,10,${this.fx.darken * 0.55})`;
-      ctx.fillRect(0, 0, VIEW_W, VIEW_H);
-      ctx.restore();
-      this.camera.apply(ctx, this.fx.shakeX, this.fx.shakeY);
+      w.save();
+      w.setTransform(1, 0, 0, 1, 0, 0);
+      w.fillStyle = `rgba(0,0,10,${this.fx.darken * 0.55})`;
+      w.fillRect(0, 0, LOW_W, LOW_H);
+      w.restore();
+      this.camera.apply(w, this.fx.shakeX, this.fx.shakeY, k);
     }
     for (const p of sim.state.projectiles) this.drawProjectile(sim, p, time);
-    // draw the fighter that is attacking on top
+
+    // fighters: drawn on their own layer, then pixelated
+    const s = this.sctx;
+    s.setTransform(1, 0, 0, 1, 0, 0);
+    s.clearRect(0, 0, LOW_W, LOW_H);
     const order = [...sim.state.fighters].sort((a, b) => (a.state === 'move' ? 1 : 0) - (b.state === 'move' ? 1 : 0));
-    for (const f of order) this.drawFighterState(sim, f, chars[f.idx], time);
-    this.fx.drawWorld(ctx);
+    for (const f of order) {
+      // hitstop shake on the fighter that got hit
+      const victim = f.hitstop > 0 && (f.state === 'hitstun' || f.state === 'launched' || f.state === 'blockstun' || f.state === 'crumple');
+      const shake = victim ? (time % 2 ? 1 : -1) * 3 * PX : 0;
+      this.camera.apply(s, this.fx.shakeX + shake, this.fx.shakeY, k);
+      this.drawFighterState(s, sim, f, chars[f.idx], time, f.idx === 1 && chars[0].id === chars[1].id);
+    }
+    pixelate(s, LOW_W, LOW_H);
+    w.setTransform(1, 0, 0, 1, 0, 0);
+    w.drawImage(this.sprites, 0, 0);
+    this.camera.apply(w, this.fx.shakeX, this.fx.shakeY, k);
+    this.fx.drawWorld(w);
+
+    // upscale to the screen
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    // floating texts in screen space
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(this.world, 0, 0, LOW_W * PX, LOW_H * PX);
+    // player markers and floating combat text in crisp screen space
+    for (const f of sim.state.fighters) {
+      const c = chars[f.idx];
+      const p = this.camera.toScreen(f.x, f.y + c.height + 30);
+      const bob = Math.floor(time / 10) % 2;
+      ctx.fillStyle = '#0b0718';
+      ctx.fillRect(Math.round(p.x) - 9, Math.round(p.y) - 12 + bob * 2, 18, 3);
+      ctx.fillStyle = f.idx === 0 ? '#4cc9f0' : '#ff4d6d';
+      for (let r = 0; r < 4; r++) ctx.fillRect(Math.round(p.x) - 6 + r * 1.5 * 2, Math.round(p.y) - 9 + r * 3 + bob * 2, 12 - r * 6 + 0, 3);
+      pixelText(ctx, f.idx === 0 ? 'P1' : 'P2', p.x, p.y - 26 + bob * 2, { scale: 2, color: f.idx === 0 ? '#4cc9f0' : '#ff4d6d', align: 'center' });
+    }
     for (const t of this.fx.texts) {
       const p = this.camera.toScreen(t.x, t.y);
-      ctx.globalAlpha = Math.min(1, t.life / 12);
-      ctx.font = `900 italic ${t.size}px system-ui, sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.lineWidth = 5;
-      ctx.strokeStyle = '#000';
-      ctx.strokeText(t.text, p.x, p.y);
-      ctx.fillStyle = t.color;
-      ctx.fillText(t.text, p.x, p.y);
+      const pop = t.max - t.life < 4 ? 1 : 0;
+      pixelText(ctx, t.text, p.x, p.y, { scale: Math.max(2, Math.round(t.size / 8)) + pop, color: t.color, align: 'center', valign: 'middle', alpha: Math.min(1, t.life / 12) });
     }
-    ctx.globalAlpha = 1;
   }
 
   drawOverlay(): void {
@@ -138,117 +254,149 @@ export class Renderer {
       const y = 300;
       ctx.save();
       ctx.globalAlpha = Math.min(1, b.life / 10);
-      ctx.fillStyle = 'rgba(0,0,0,0.75)';
-      ctx.fillRect(0, y - 40, VIEW_W, 80);
+      ctx.fillStyle = 'rgba(5,3,15,0.82)';
+      ctx.fillRect(0, y - 44, VIEW_W, 88);
       ctx.fillStyle = b.color;
-      ctx.fillRect(0, y - 40, VIEW_W, 4);
-      ctx.fillRect(0, y + 36, VIEW_W, 4);
-      ctx.font = '900 italic 52px system-ui, sans-serif';
-      ctx.textAlign = b.owner === 0 ? 'left' : 'right';
-      const x = b.owner === 0 ? -400 + slide * 480 : VIEW_W + 400 - slide * 480;
-      ctx.fillStyle = '#fff';
-      ctx.fillText(b.text.toUpperCase(), x, y + 18);
+      for (let x = 0; x < VIEW_W; x += 12) {
+        ctx.fillRect(x, y - 44, 6, 4);
+        ctx.fillRect(x + 6, y + 40, 6, 4);
+      }
+      const x = b.owner === 0 ? -500 + slide * 580 : VIEW_W + 500 - slide * 580;
+      pixelText(ctx, b.text.toUpperCase(), x, y, { scale: 6, color: '#ffffff', align: b.owner === 0 ? 'left' : 'right', valign: 'middle', shadow: b.color });
       ctx.restore();
     }
   }
 
+  /** Pixel-art backdrop drawn directly in buffer pixels: dithered sky, stars, moon, two
+   *  parallax skyline layers with flickering windows and neon signs. */
   private drawBackground(time: number): void {
-    const ctx = this.ctx;
-    const g = ctx.createLinearGradient(0, 0, 0, VIEW_H);
-    g.addColorStop(0, '#0b0a1f');
-    g.addColorStop(0.55, '#2a1650');
-    g.addColorStop(1, '#5a2a52');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
-    // parallax stars
-    ctx.fillStyle = '#ffffff';
-    for (const s of this.stars) {
-      const x = (s.x - this.camera.x * 0.2 * s.s) % 1800;
-      ctx.globalAlpha = 0.3 + 0.3 * Math.sin(time * 0.02 + s.x);
-      ctx.fillRect(x < 0 ? x + 1800 : x, VIEW_H - s.y, s.s, s.s);
+    const w = this.wctx;
+    const groundY = Math.round((GROUND_Y + this.camera.y * this.camera.zoom) / PX);
+    const bands = ['#0b0a1f', '#130e2e', '#1d1340', '#2b1852', '#3e1f5f', '#572765', '#733066'];
+    const bh = Math.ceil(groundY / bands.length);
+    for (let i = 0; i < bands.length; i++) {
+      w.fillStyle = bands[i];
+      w.fillRect(0, i * bh, LOW_W, bh + 1);
+      // checkerboard dither into the next band
+      if (i < bands.length - 1) {
+        w.fillStyle = bands[i + 1];
+        for (let y = i * bh + bh - 2; y < i * bh + bh; y++) for (let x = (y % 2); x < LOW_W; x += 2) w.fillRect(x, y, 1, 1);
+      }
     }
-    ctx.globalAlpha = 1;
-    // distant skyline
-    ctx.fillStyle = '#1a1033';
-    for (let i = 0; i < 24; i++) {
-      const bx = i * 110 - ((this.camera.x * 0.35) % 110) - 120;
-      const h = 80 + ((i * 73) % 140);
-      ctx.fillRect(bx, GROUND_Y - h - 40, 90, h + 40);
-      ctx.fillStyle = '#ffcf6b22';
-      for (let w = 0; w < 6; w++) if ((i * 7 + w * 3) % 5 === 0) ctx.fillRect(bx + 12 + (w % 3) * 24, GROUND_Y - h - 20 + Math.floor(w / 3) * 30, 10, 14);
-      ctx.fillStyle = '#1a1033';
+    const camX = this.camera.x;
+    for (const s of this.stars) {
+      const x = ((((s.x - camX * 0.04) % 700) + 700) % 700) - 100;
+      if (x < 0 || x >= LOW_W) continue;
+      const on = s.b > 0.85 ? Math.floor(time / 20 + s.b * 10) % 3 !== 0 : true;
+      if (!on) continue;
+      w.fillStyle = s.b > 0.7 ? '#ffffff' : '#9a8cc7';
+      w.fillRect(x, s.y, 1, 1);
+      if (s.b > 0.95) {
+        w.fillStyle = '#9a8cc788';
+        w.fillRect(x - 1, s.y, 3, 1);
+        w.fillRect(x, s.y - 1, 1, 3);
+      }
     }
     // moon
-    ctx.fillStyle = '#ffe8d6';
-    ctx.globalAlpha = 0.85;
-    ctx.beginPath();
-    ctx.arc(1000 - this.camera.x * 0.05, 140, 60, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = 1;
+    const mx = Math.round(330 - camX * 0.015);
+    const my = 58;
+    const R = 15;
+    for (let dy = -R - 3; dy <= R + 3; dy++) {
+      for (let dx = -R - 3; dx <= R + 3; dx++) {
+        const d = Math.hypot(dx, dy);
+        if (d <= R) w.fillStyle = (dx + dy) % 7 === 0 && d < R - 3 && dx < 0 ? '#e7c9b4' : d > R - 1.5 ? '#f3d9c4' : '#ffe8d6';
+        else if (d <= R + 3 && (dx + dy) % 2 === 0) w.fillStyle = '#ffe8d622';
+        else continue;
+        w.fillRect(mx + dx, my + dy, 1, 1);
+      }
+    }
+    const skyline = (layer: Building[], par: number, color: string, base: number, wrap: number, lit: string) => {
+      const off = (((camX * par) % wrap) + wrap) % wrap;
+      for (const b of layer) {
+        for (const rep of [0, wrap]) {
+          const x = Math.round(b.x - off + rep - 40);
+          if (x > LOW_W || x + b.w < 0) continue;
+          const top = base - b.h;
+          w.fillStyle = color;
+          w.fillRect(x, top, b.w, b.h);
+          w.fillRect(x + Math.floor(b.w / 2), top - 4, 1, 4); // antenna
+          // windows
+          for (let i = 0; i < b.lights.length; i++) {
+            const wx = x + 3 + (i % 4) * Math.floor((b.w - 4) / 4);
+            const wy = top + 4 + Math.floor(i / 4) * 7;
+            if (wy > base - 4) continue;
+            const flick = b.lights[i] && Math.floor(time / 90 + i * 7 + b.x) % 11 !== 0;
+            w.fillStyle = flick ? lit : '#00000033';
+            w.fillRect(wx, wy, 2, 2);
+          }
+          if (b.sign >= 0) {
+            const col = ['#ff4d6d', '#4cc9f0', '#ffd60a'][b.sign];
+            const on = Math.floor(time / 6 + b.x) % 40 !== 0;
+            w.fillStyle = on ? col : '#2b1852';
+            w.fillRect(x + 2, top + 2, Math.max(4, b.w - 4), 2);
+          }
+        }
+      }
+    };
+    skyline(this.far, 0.12, '#1a1033', groundY - 6, 900, '#ffcf6b55');
+    skyline(this.near, 0.32, '#24174a', groundY, 1100, '#ffcf6baa');
+    // haze line above the floor
+    w.fillStyle = '#ff4d6d22';
+    w.fillRect(0, groundY - 3, LOW_W, 3);
   }
 
   private drawStage(): void {
-    const ctx = this.ctx;
+    const w = this.wctx;
     const L = CFG.stage.left;
     const R = CFG.stage.right;
-    // floor
-    ctx.fillStyle = '#231942';
-    ctx.fillRect(L - 400, -400, R - L + 800, 400);
-    ctx.fillStyle = '#5e548e';
-    ctx.fillRect(L - 400, -6, R - L + 800, 6);
-    ctx.strokeStyle = '#9f86c022';
-    ctx.lineWidth = 2;
-    for (let x = L - 400; x < R + 400; x += 70) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x + (x - 700) * 0.5, -300);
-      ctx.stroke();
+    w.fillStyle = '#231942';
+    w.fillRect(L - 600, -500, R - L + 1200, 500);
+    // checkered floor tiles
+    for (let x = L - 600; x < R + 600; x += 80) {
+      w.fillStyle = Math.floor((x - L) / 80) % 2 ? '#2a1f4f' : '#211843';
+      w.fillRect(x, -26, 80, 20);
+      w.fillStyle = Math.floor((x - L) / 80) % 2 ? '#1e1640' : '#261c4a';
+      w.fillRect(x, -60, 80, 34);
     }
-    // walls
+    w.fillStyle = '#8a7cc0';
+    w.fillRect(L - 600, -3, R - L + 1200, 3);
+    w.fillStyle = '#5e548e';
+    w.fillRect(L - 600, -6, R - L + 1200, 3);
+    // walls: riveted pillars
     for (const wx of [L, R]) {
       const dir = wx === L ? -1 : 1;
-      ctx.fillStyle = '#3d2c6b';
-      ctx.fillRect(wx + (dir < 0 ? -60 : 0), 0, 60, 900);
-      ctx.fillStyle = '#e0aaff55';
-      ctx.fillRect(wx + (dir < 0 ? -4 : 0), 0, 4, 900);
+      const x0 = wx + (dir < 0 ? -70 : 0);
+      w.fillStyle = '#3d2c6b';
+      w.fillRect(x0, 0, 70, 900);
+      w.fillStyle = '#2c1f52';
+      for (let y = 0; y < 900; y += 60) w.fillRect(x0, y, 70, 6);
+      w.fillStyle = '#e0aaff88';
+      w.fillRect(wx + (dir < 0 ? -6 : 0), 0, 6, 900);
     }
   }
 
-  private drawFighterState(sim: Sim, f: FighterState, c: CharacterDef, time: number): void {
-    const ctx = this.ctx;
-    const j = this.joints[f.idx] ?? buildJoints(f, c, computePose(sim, f, time));
-    // shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.35)';
-    ctx.beginPath();
-    ctx.ellipse(f.x, 1, c.width * 0.8 * Math.max(0.4, 1 - f.y / 500), 6, 0, 0, Math.PI * 2);
-    ctx.fill();
+  private drawFighterState(ctx: CanvasRenderingContext2D, sim: Sim, f: FighterState, c: CharacterDef, time: number, mirror = false): void {
+    const anim = this.anims[f.idx];
+    const j = anim.joints!;
     let extendTo: number | null = null;
     const m = sim.move(f);
     if (m?.pose === 'piston') {
       const h = m.hits?.[0];
       if (h && f.moveFrame >= h.frames[0] && f.moveFrame <= h.frames[1] + 6 && h.boxes[0]) extendTo = f.x + f.facing * (h.boxes[0].x + h.boxes[0].w);
     }
-    // invulnerability shimmer
     const invuln = f.wakeInvuln > 0 || f.airRecoverInvuln > 0 || f.state === 'techroll' || (m?.invuln?.some((iv) => f.moveFrame >= iv.frames[0] && f.moveFrame <= iv.frames[1]) ?? false);
-    const pal = c.palette;
-    const alpha = invuln ? 0.65 + 0.25 * Math.sin(time * 0.6) : 1;
-    drawFighter(ctx, f, c, j, { primary: pal.primary, secondary: pal.secondary, accent: pal.accent, skin: pal.skin, outline: '#0b0a14', alpha, extendTo, flash: this.hitFlash[f.idx] }, time);
-    // player marker
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    const p = this.camera.toScreen(f.x, f.y + c.height + 34);
-    ctx.fillStyle = f.idx === 0 ? '#4cc9f0' : '#ff4d6d';
-    ctx.beginPath();
-    ctx.moveTo(p.x - 6, p.y - 8);
-    ctx.lineTo(p.x + 6, p.y - 8);
-    ctx.lineTo(p.x, p.y);
-    ctx.fill();
-    ctx.restore();
-    this.camera.apply(ctx, this.fx.shakeX, this.fx.shakeY);
+    // mirror matches: player 2 wears an alternate colour scheme
+    const pal = mirror ? { ...c.palette, primary: shade(c.palette.primary, 0.35), secondary: c.palette.accent, accent: c.palette.secondary } : c.palette;
+    // hit flash = solid white sprite; invulnerability = flickering aura-coloured silhouette
+    const flat = anim.hitFlash > 1 ? '#ffffff' : invuln && Math.floor(time / 3) % 2 === 0 ? pal.aura : undefined;
+    drawChains(ctx, anim, c, false, '#0b0714');
+    drawFighter(ctx, f, c, j, { primary: pal.primary, secondary: pal.secondary, accent: pal.accent, skin: pal.skin, outline: '#0b0a14', alpha: 1, extendTo, flat }, time);
+    drawChains(ctx, anim, c, true, '#0b0714');
+    drawSmear(ctx, anim);
   }
 
   private drawProjectile(sim: Sim, p: ProjectileState, time: number): void {
-    const ctx = this.ctx;
+    const ctx = this.wctx;
     const def = sim.projDef(p.owner, p.defId);
     if (!def) return;
     const b = sim.projBox(p);
@@ -398,7 +546,7 @@ export class Renderer {
         ctx.stroke();
         break;
       case 'decoy': {
-        const o = this.joints[p.owner];
+        const o = this.anims[p.owner].joints;
         ctx.globalAlpha = active ? 0.9 : 0.35 + 0.2 * Math.sin(time);
         ctx.fillStyle = def.color;
         if (active) {
