@@ -46,16 +46,16 @@ const moves: MoveDef[] = [
     vel: [{ frame: 3, until: 28, x: 2.5, mode: 'set' }],
     hits: [
       multiHit(4, 28, 2, B(10, 50, 64, 54), 9, { hitstun: 14, blockstun: 10, spark: 'light', proration: 0.97 }),
-      hitAt(31, 33, B(10, 50, 76, 54), 70, { hitstun: 26, knockback: { x: 11, y: 4 }, launch: true, wallBounce: true, spark: 'heavy' }),
+      hitAt(31, 33, B(10, 50, 76, 54), 70, { hitstun: 26, knockback: { x: 11, y: 5.5 }, launch: true, wallBounce: true, spark: 'heavy' }),
     ],
     cancels: { onHit: ['super', 'special'], onBlock: ['super'] },
   },
   strike({
-    id: 'r_shoulder', name: 'Shoulder Charge', input: '6S', desc: 'Charging shoulder that wall-bounces.', strength: 'S', kind: 'special', f: [6, 11, 16], box: B(10, 40, 50, 70), dmg: 76, kb: [10, 3], pose: 'shoulder', enhanced: 'r_shoulder_od',
+    id: 'r_shoulder', name: 'Shoulder Charge', input: '6S', desc: 'Charging shoulder that wall-bounces.', strength: 'S', kind: 'special', f: [6, 11, 16], box: B(10, 40, 50, 70), dmg: 76, kb: [10, 5.5], pose: 'shoulder', enhanced: 'r_shoulder_od',
     vel: [{ frame: 4, until: 16, x: 12, mode: 'set' }, { frame: 17, x: 1, mode: 'set' }], hit: { wallBounce: true, launch: true, spark: 'heavy' }, cmd: { btn: 'S', dir: '6' }, fx: [{ frame: 4, cue: 'speedlines' }],
   }),
   strike({
-    id: 'r_shoulder_od', name: 'Shoulder Charge (OD)', input: '6S [Overdrive]', desc: 'Overdrive: armored (1 hit) and faster.', strength: 'S', kind: 'special', f: [4, 11, 12], box: B(10, 40, 54, 74), dmg: 90, kb: [12, 4], pose: 'shoulder',
+    id: 'r_shoulder_od', name: 'Shoulder Charge (OD)', input: '6S [Overdrive]', desc: 'Overdrive: armored (1 hit) and faster.', strength: 'S', kind: 'special', f: [4, 11, 12], box: B(10, 40, 54, 74), dmg: 90, kb: [12, 6], pose: 'shoulder',
     armor: { frames: [1, 14], hits: 1, damageMult: 0.5 }, vel: [{ frame: 2, until: 14, x: 15, mode: 'set' }, { frame: 15, x: 1, mode: 'set' }], hit: { wallBounce: true, launch: true, spark: 'heavy' }, fx: [{ frame: 2, cue: 'speedlines' }],
   }),
   {
@@ -76,7 +76,7 @@ const moves: MoveDef[] = [
     vel: [{ frame: 8, until: 24, x: 11, y: -11, mode: 'set' }], gravity: 0, hit: { groundBounce: true, spark: 'heavy' }, landing: { mode: 'end', lag: 8 }, cmd: { btn: 'S', dir: '*', air: true },
   }),
   {
-    id: 'r_overdrive', name: 'Overdrive', input: '5X', desc: '1 bar to activate, then drains meter (up to 10s). +20% speed, +15% damage, free whiff cancels on normals, enhanced Rush Combo and Shoulder Charge.', kind: 'super', strength: 'X', stance: 'ground', total: 20, superFreeze: 20,
+    id: 'r_overdrive', name: 'Overdrive', input: '5X', desc: '1 bar to activate, then drains meter (up to 10s). +20% movement speed, +15% damage, free whiff cancels on normals, enhanced Rush Combo and Shoulder Charge.', kind: 'super', strength: 'X', stance: 'ground', total: 20, superFreeze: 20,
     cost: { meter: 100 }, requires: { noInstall: true }, install: { frames: 600, drainPerFrame: 0.2 }, invuln: [{ frames: [1, 12], types: ['strike', 'throw', 'projectile'] }], pose: 'burst', cmd: { btn: 'X', dir: '5' }, fx: [{ frame: 1, cue: 'superflash' }, { frame: 2, cue: 'install' }],
   },
   {

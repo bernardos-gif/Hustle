@@ -2,7 +2,7 @@
 // All mutable state lives in `state` as plain data so it can be snapshotted for replays,
 // rewinding and (in the future) rollback networking.
 
-import { BUTTON_PRIORITY, IN, consume, dirMatches, dirVector, feedInput, held, newInputBuffer, numpadDir, pressed, type ButtonName } from '../core/input';
+import { BUTTON_PRIORITY, IN, commandDir, consume, dirMatches, dirVector, feedInput, held, newInputBuffer, numpadDir, pressed, type ButtonName } from '../core/input';
 import { boxesOverlap, clamp, overlapCenter, q, rngNext, sign, type Box } from '../core/math';
 import { CFG } from './config';
 import { charData, type CharData } from './registry';
@@ -400,13 +400,14 @@ export class Sim {
         this.airNeutral(f);
         break;
       case 'landing':
-        if (--f.landingLag <= 0) this.toNeutral(f);
+        if (f.landingLag <= 0) this.resume(f);
+        else f.landingLag--;
         break;
       case 'dash':
         this.updateDash(f);
         break;
       case 'backdash':
-        if (f.stateFrame >= c.backdashFrames) this.toNeutral(f);
+        if (f.stateFrame >= c.backdashFrames) this.resume(f);
         break;
       case 'airdash':
         this.updateAirdash(f);
@@ -421,10 +422,12 @@ export class Sim {
           this.startMove(f, 'pushblock', { force: true });
           break;
         }
-        if (--f.blockstun <= 0) this.toNeutral(f);
+        if (f.blockstun <= 0) this.resume(f);
+        else f.blockstun--;
         break;
       case 'hitstun':
-        if (--f.hitstun <= 0) this.toNeutral(f);
+        if (f.hitstun <= 0) this.resume(f);
+        else f.hitstun--;
         break;
       case 'crumple':
         if (--f.hitstun <= 0) this.knockDown(f, false);
@@ -440,14 +443,14 @@ export class Sim {
         f.wakeInvuln = 2;
         if (f.stateFrame >= CFG.knockdown.getupFrames) {
           f.wakeInvuln = 4;
-          this.toNeutral(f);
+          this.resume(f);
         }
         break;
       case 'techroll':
         f.wakeInvuln = 2;
         if (f.stateFrame >= CFG.knockdown.techRollFrames) {
           f.vx = 0;
-          this.toNeutral(f);
+          this.resume(f);
         }
         break;
       case 'thrown':
@@ -460,7 +463,7 @@ export class Sim {
         }
         break;
       case 'throwtech':
-        if (f.stateFrame >= CFG.throwTech.stun) this.toNeutral(f);
+        if (f.stateFrame >= CFG.throwTech.stun) this.resume(f);
         break;
       case 'ko':
       case 'win':
@@ -643,7 +646,7 @@ export class Sim {
       if (d === 6) {
         this.setState(f, 'run');
         f.vx = c.runSpeed * f.facing;
-      } else this.toNeutral(f);
+      } else this.resume(f);
     }
   }
 
@@ -694,7 +697,7 @@ export class Sim {
   /** Finds the move a button press maps to given the current direction, air state and stance. */
   resolveMove(f: FighterState, btn: ButtonName, air: boolean): MoveDef | null {
     const cd = this.cdata(f);
-    const d = numpadDir(f.input.cur, f.facing);
+    const d = numpadDir(commandDir(f.input, btn), f.facing);
     for (const cmd of cd.commands) {
       if (cmd.btn !== btn || cmd.air !== air) continue;
       if (cmd.stance && cmd.stance !== f.stance) continue;
@@ -758,7 +761,7 @@ export class Sim {
     for (const btn of BUTTON_PRIORITY) {
       if (!pressed(inp, btn)) continue;
       if (btn === 'D') {
-        const d = numpadDir(inp.cur, f.facing);
+        const d = numpadDir(commandDir(inp, 'D'), f.facing);
         if (f.stance) {
           const sm = this.resolveMove(f, 'D', air);
           if (sm?.cmd?.stance && (!tags || this.cancelAllowed(tags, from, sm))) {
@@ -968,7 +971,7 @@ export class Sim {
       return;
     }
 
-    if (fr >= m.total) {
+    if (fr > m.total) {
       this.endMove(f, m);
       return;
     }
@@ -987,7 +990,8 @@ export class Sim {
     const extra: CancelTag[] = f.install && (m.kind === 'normal' || m.kind === 'command') ? ['special', 'chain'] : [];
     if (tags.length && this.tryActions(f, tags, m)) return;
     // free (whiff) cancels cost a feint charge, unless an install grants them
-    if ((f.moveResult === 'none' || f.moveResult === 'whiff') && fr >= first) {
+    // a move only counts as whiffed once all of its active frames have passed without contact
+    if ((f.moveResult === 'none' || f.moveResult === 'whiff') && fr > Math.max(first, this.lastActive(m))) {
       const wt = [...(cn.onWhiff ?? []), ...extra];
       if (!wt.length) return;
       const free = extra.length > 0;
@@ -1006,6 +1010,15 @@ export class Sim {
     const helpless = !!m.helpless && !f.grounded;
     this.toNeutral(f);
     f.helpless = helpless;
+    this.resume(f);
+  }
+
+  /** Returns to neutral and immediately processes buffered input, so the first actionable
+   *  frame after any recovery can start a new action. */
+  private resume(f: FighterState): void {
+    if (f.state !== 'idle' && f.state !== 'crouch' && f.state !== 'air') this.toNeutral(f);
+    if (f.state === 'air') this.airNeutral(f);
+    else this.groundNeutral(f);
   }
 
   /** Ends a move early because the fighter was interrupted. */
@@ -1055,6 +1068,10 @@ export class Sim {
     }
     f.x += f.vx;
     f.y += f.vy;
+    if (f.y > CFG.stage.ceiling) {
+      f.y = CFG.stage.ceiling;
+      if (f.vy > 0) f.vy = 0;
+    }
     if (f.y <= 0) {
       f.y = 0;
       if (!wasGrounded || f.vy < 0) {

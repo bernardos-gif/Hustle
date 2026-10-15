@@ -4,7 +4,7 @@
 export const FPS = 60;
 
 export const CFG = {
-  stage: { left: 0, right: 1400, width: 1400 },
+  stage: { left: 0, right: 1400, width: 1400, ceiling: 820 },
   /** Max horizontal distance between fighters (camera limit). */
   maxSeparation: 900,
   roundFrames: 99 * FPS,

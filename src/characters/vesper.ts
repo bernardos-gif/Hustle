@@ -37,7 +37,7 @@ const moves: MoveDef[] = [
     },
   },
   strike({
-    id: 'v_lunge', name: 'Fleche Lunge', input: '6S', desc: 'Explosive long-range lunge. Wall-bounces. Heavily punishable on block.', strength: 'S', kind: 'special', f: [12, 6, 24], box: B(20, 55, 100, 24), dmg: 105, hitstun: 26, blockstun: 12, kb: [9, 4],
+    id: 'v_lunge', name: 'Fleche Lunge', input: '6S', desc: 'Explosive long-range lunge. Wall-bounces. Heavily punishable on block.', strength: 'S', kind: 'special', f: [12, 6, 24], box: B(20, 55, 100, 24), dmg: 105, hitstun: 26, blockstun: 12, kb: [9, 5.5],
     pose: 'thrust', disjoint: true, vel: [{ frame: 9, until: 17, x: 13, mode: 'set' }, { frame: 18, x: 1, mode: 'set' }], hit: { wallBounce: true, launch: true, priority: 4, spark: 'slash' }, cmd: { btn: 'S', dir: '6' }, fx: [{ frame: 9, cue: 'speedlines' }],
   }),
   {

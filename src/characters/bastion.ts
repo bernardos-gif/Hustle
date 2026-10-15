@@ -9,7 +9,7 @@ const moves: MoveDef[] = [
   strike({ id: 'b_5L', name: 'Piston Jab', input: '5L', desc: 'Heavy jab — slower than other lights, but long.', strength: 'L', f: [6, 2, 10], box: B(20, 82, 58, 24), dmg: 38, pose: 'jab', cmd: { btn: 'L', dir: '5' } }),
   strike({ id: 'b_5M', name: 'Hammer Hook', input: '5M', desc: 'Swinging hook with big pushback.', strength: 'M', f: [10, 4, 16], box: B(14, 62, 78, 44), dmg: 68, kb: [6, 0], pose: 'hook', hit: { spark: 'blunt' }, cmd: { btn: 'M', dir: '5' } }),
   strike({
-    id: 'b_5H', name: 'Gigaton Straight', input: '5H', desc: 'Armored (1 hit, frames 6-16) haymaker that wall-bounces.', strength: 'H', f: [16, 4, 24], box: B(20, 70, 108, 36), dmg: 118, kb: [10, 3], pose: 'heavy_punch',
+    id: 'b_5H', name: 'Gigaton Straight', input: '5H', desc: 'Armored (1 hit, frames 6-16) haymaker that wall-bounces.', strength: 'H', f: [16, 4, 24], box: B(20, 70, 108, 36), dmg: 118, kb: [10, 5], pose: 'heavy_punch',
     armor: { frames: [6, 16], hits: 1, damageMult: 0.5 }, hit: { wallBounce: true, launch: true, spark: 'heavy', hitstop: 14 }, cmd: { btn: 'H', dir: '5' }, fx: [{ frame: 6, cue: 'armor' }],
   }),
   strike({ id: 'b_2L', name: 'Low Knuckle', input: '2L', desc: 'Low punch.', strength: 'L', f: [6, 2, 10], box: B(18, 4, 60, 22), dmg: 32, guard: 'low', pose: 'lowjab', cmd: { btn: 'L', dir: 'd' } }),
@@ -31,7 +31,7 @@ const moves: MoveDef[] = [
   }),
   strike({ id: 'b_quake_land', name: 'Impact', input: '', desc: '', hidden: true, strength: 'H', f: [1, 4, 18], box: B(-80, 0, 160, 30), dmg: 40, guard: 'low', kb: [4, 6], pose: 'stomp', hit: { launch: true, otg: true, spark: 'heavy' }, cancels: 'none', fx: [{ frame: 1, cue: 'shockwave' }] }),
   strike({
-    id: 'b_piston', name: 'Piston Punch', input: '6S', desc: '20 fuel. The arm extends across a third of the screen. Armored frames 4-14. Very punishable whiff.', strength: 'S', kind: 'special', f: [14, 6, 28], box: B(40, 72, 190, 28), dmg: 98, kb: [8, 2], pose: 'piston',
+    id: 'b_piston', name: 'Piston Punch', input: '6S', desc: '20 fuel. The arm extends across a third of the screen. Armored frames 4-14. Very punishable whiff.', strength: 'S', kind: 'special', f: [14, 6, 28], box: B(40, 72, 190, 28), dmg: 98, kb: [8, 5], pose: 'piston',
     cost: { resource: { fuel: 20 } }, armor: { frames: [4, 14], hits: 1, damageMult: 0.5 }, hit: { wallBounce: true, launch: true, spark: 'heavy', destroysProjectiles: true }, cmd: { btn: 'S', dir: '6' }, fx: [{ frame: 14, cue: 'steam' }],
   }),
   {

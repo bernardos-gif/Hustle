@@ -17,6 +17,20 @@ export const IN = {
   X: 1 << 11, // super / burst (in hitstun)
 } as const;
 
+export const DIR_MASK = IN.UP | IN.DOWN | IN.LEFT | IN.RIGHT;
+
+/**
+ * Direction to use for a buffered button: the direction held when it was pressed, except that
+ * a direction arriving within 2 frames after a neutral press still counts (input leniency).
+ */
+export function commandDir(b: InputBufferState, n: ButtonName): number {
+  const age = b.press[n];
+  if (age < 0) return b.cur & DIR_MASK;
+  const pd = b.pressDir[n];
+  if (pd === 0 && age <= 2) return b.cur & DIR_MASK;
+  return pd;
+}
+
 export type ButtonName = 'L' | 'M' | 'H' | 'S' | 'T' | 'D' | 'P' | 'X';
 export const BUTTONS: ButtonName[] = ['L', 'M', 'H', 'S', 'T', 'D', 'P', 'X'];
 /** Order in which simultaneously-buffered buttons are considered when picking an action. */
@@ -32,6 +46,8 @@ export interface InputBufferState {
   prev: number;
   /** Age (frames since press) of the most recent unconsumed press of each button, -1 if none. */
   press: Record<ButtonName, number>;
+  /** Directions held when each button was pressed (so buffered moves keep their direction). */
+  pressDir: Record<ButtonName, number>;
   /** Frames each button has been held. */
   held: Record<ButtonName, number>;
   /** Short history of raw masks (newest last) used by the debug display and double taps. */
@@ -48,6 +64,7 @@ export function newInputBuffer(): InputBufferState {
     cur: 0,
     prev: 0,
     press: z(),
+    pressDir: { L: 0, M: 0, H: 0, S: 0, T: 0, D: 0, P: 0, X: 0 },
     held: { L: 0, M: 0, H: 0, S: 0, T: 0, D: 0, P: 0, X: 0 },
     history: [],
     lastTapDir: 0,
@@ -63,7 +80,10 @@ export function feedInput(b: InputBufferState, mask: number): void {
     const bit = IN[name];
     const down = (mask & bit) !== 0;
     const wasDown = (b.prev & bit) !== 0;
-    if (down && !wasDown) b.press[name] = 0;
+    if (down && !wasDown) {
+      b.press[name] = 0;
+      b.pressDir[name] = mask & DIR_MASK;
+    }
     else if (b.press[name] >= 0) {
       b.press[name]++;
       if (b.press[name] > BUFFER_FRAMES) b.press[name] = -1;

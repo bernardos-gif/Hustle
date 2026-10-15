@@ -9,6 +9,7 @@ function fuzz(a: string, b: string, frames: number, seed: number) {
   const r = { seed };
   let held = [0, 0];
   const stuck = [0, 0];
+  const sig = ['', ''];
   for (let i = 0; i < frames; i++) {
     for (let p = 0; p < 2; p++) if (rngNext(r) < 0.15) held[p] = Math.floor(rngNext(r) * 4096);
     sim.step([held[0], held[1]]);
@@ -19,10 +20,22 @@ function fuzz(a: string, b: string, frames: number, seed: number) {
       if (f.meter < 0 || f.meter > CFG.meter.max) throw new Error('meter out of range');
       for (const k in f.resources) if (f.resources[k] < 0) throw new Error('negative resource ' + k);
       if (f.state === 'thrown' && sim.state.fighters[f.grabbedBy as 0 | 1]?.state !== 'move') throw new Error('orphan thrown');
-      stuck[f.idx] = sim.isActionable(f) ? 0 : stuck[f.idx] + 1;
-      if (stuck[f.idx] > 600 && sim.state.round.phase === 'fight') throw new Error(`stuck ${f.charId} in ${f.state} ${f.moveId}`);
+      // a fighter is stuck if nothing about its state advances for a long time
+      const k = `${f.state}|${f.moveId}|${f.moveFrame}|${f.stateFrame}|${f.hitstun}|${f.blockstun}|${f.knockdownFrames}|${f.x}|${f.y}|${f.moveCharge}`;
+      stuck[f.idx] = k === sig[f.idx] && !sim.isActionable(f) ? stuck[f.idx] + 1 : 0;
+      sig[f.idx] = k;
+      if (stuck[f.idx] > 300 && sim.state.round.phase === 'fight') throw new Error(`stuck ${f.charId} in ${f.state} ${f.moveId}`);
     }
     if (sim.state.round.phase === 'over') sim.resetMatch();
+  }
+  // with hands off the controller, both fighters must return to neutral (no permanent states)
+  if (sim.state.round.phase === 'fight') {
+    sim.state.projectiles = []; // summons (e.g. Bastion's drone) would legitimately keep attacking
+    for (let i = 0; i < 400; i++) sim.step([0, 0]);
+    for (const f of sim.state.fighters) {
+      if (sim.state.round.phase !== 'fight') break;
+      if (!sim.isActionable(f) && f.state !== 'landing') throw new Error(`${f.charId} did not return to neutral: ${f.state} ${f.moveId}`);
+    }
   }
   return sim;
 }

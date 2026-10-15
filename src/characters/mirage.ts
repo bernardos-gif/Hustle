@@ -33,7 +33,7 @@ const moves: MoveDef[] = [
     id: 'm_6M', name: 'Hop Kick', input: '6M', desc: 'Hopping overhead kick that passes over lows.', strength: 'M', kind: 'command', f: [16, 3, 12], box: B(8, 30, 58, 50), dmg: 46, guard: 'high', pose: 'air_kick',
     vel: [{ frame: 3, y: 6.5, x: 4, mode: 'set' }], landing: { mode: 'continue' }, cmd: { btn: 'M', dir: '6' },
   }),
-  strike({ id: 'm_4H', name: 'Mirror Palm', input: '4H', desc: 'Palm blast that wall-bounces.', strength: 'H', kind: 'command', f: [12, 3, 18], box: B(10, 48, 62, 50), dmg: 66, kb: [10, 1], pose: 'palm', hit: { wallBounce: true, launch: true }, cmd: { btn: 'H', dir: '4' } }),
+  strike({ id: 'm_4H', name: 'Mirror Palm', input: '4H', desc: 'Palm blast that wall-bounces.', strength: 'H', kind: 'command', f: [12, 3, 18], box: B(10, 48, 62, 50), dmg: 66, kb: [10, 5], pose: 'palm', hit: { wallBounce: true, launch: true }, cmd: { btn: 'H', dir: '4' } }),
   strike({ id: 'm_jL', name: 'Air Flick', input: 'j.L', desc: 'Fast air kick.', strength: 'L', air: true, f: [4, 3, 7], box: B(8, 30, 52, 30), dmg: 24, pose: 'air_kick', cmd: { btn: 'L', dir: '*', air: true } }),
   strike({ id: 'm_jM', name: 'Air Spin', input: 'j.M', desc: 'Hits on both sides — a cross-up tool.', strength: 'M', air: true, f: [6, 5, 11], box: B(-44, 28, 104, 40), dmg: 40, pose: 'spin', cmd: { btn: 'M', dir: '*', air: true } }),
   strike({ id: 'm_jH', name: 'Air Axe', input: 'j.H', desc: 'Overhead axe kick. Spikes and ground-bounces airborne foes.', strength: 'H', air: true, f: [9, 4, 14], box: B(0, 4, 62, 62), dmg: 58, guard: 'high', kb: [2, -9], pose: 'air_hammer', hit: { groundBounce: true }, cmd: { btn: 'H', dir: '*', air: true } }),
@@ -90,6 +90,10 @@ const moves: MoveDef[] = [
     id: 'm_decoy', name: 'Decoy', input: '4S', desc: 'Hops back leaving an afterimage that detonates after half a second.', kind: 'special', strength: 'S', stance: 'ground', total: 26,
     spawns: [{ frame: 2, projectile: 'm_decoy', offset: { x: 0, y: 0 } }], vel: [{ frame: 2, until: 9, x: -9, mode: 'set' }, { frame: 10, x: 0, mode: 'set' }], invuln: [{ frames: [1, 6], types: ['strike'] }],
     pose: 'evade', cmd: { btn: 'S', dir: '4' }, cancels: { window: [14, 25], always: ['special'] },
+  },
+  {
+    id: 'm_reflect', name: 'Mirror Pane', input: '3S', desc: 'Raises a mirror (frames 3-18) that reflects projectiles back faster, now owned by Mirage.', kind: 'special', strength: 'S', stance: 'ground', total: 30,
+    reflect: { frames: [3, 18], box: B(10, 0, 70, 140) }, invuln: [{ frames: [3, 18], types: ['projectile'] }], pose: 'palm', cmd: { btn: 'S', dir: '3' }, cancels: { window: [19, 29], onHit: ['any', 'super'] },
   },
   {
     id: 'm_ghost', name: 'Ghost Step', input: 'j.S', desc: 'Teleports behind the opponent on frame 11. Costs an air option. Readable startup.', kind: 'special', strength: 'S', stance: 'air', total: 28, gravity: 0.15,

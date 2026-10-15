@@ -6,6 +6,7 @@ import { FPS } from '../combat/config';
 import { Sim, defaultSettings, type SimSettings } from '../combat/sim';
 import type { CharacterDef, CombatEvent } from '../combat/types';
 import { IN } from '../core/input';
+import { STEP_MS, takeSteps, type Accumulator } from '../core/loop';
 import { AIController, DIFFICULTIES } from '../ai/ai';
 import { Sfx } from '../audio/sfx';
 import { Effects, defaultFxSettings, type AuraConfig, type SparkStyle } from '../render/effects';
@@ -22,7 +23,6 @@ import { TrainingDummy, defaultTraining, type TrainingConfig } from './training'
 type Screen = 'title' | 'select' | 'match' | 'movelist' | 'options' | 'aura' | 'controls' | 'replays' | 'replay';
 type Mode = 'cpu' | 'versus' | 'training' | 'watch';
 
-const STEP_MS = 1000 / FPS;
 const FONT = 'system-ui, -apple-system, Segoe UI, sans-serif';
 
 interface MenuItem {
@@ -65,7 +65,7 @@ export class App {
   pauseIdx = 0;
   overFrames = 0;
   resultsIdx = 0;
-  acc = 0;
+  loop: Accumulator = { acc: 0 };
   lastTs = 0;
   time = 0;
   showBoxes = false;
@@ -187,16 +187,9 @@ export class App {
   }
 
   private advance(dt: number): void {
-    const sim = this.sim;
-    if (!sim) return;
-    this.acc += dt;
-    let n = 0;
-    while (this.acc >= STEP_MS && n < 5) {
-      this.stepMatch();
-      this.acc -= STEP_MS;
-      n++;
-    }
-    if (n === 5) this.acc = 0; // never spiral: drop time if the device is too slow
+    if (!this.sim) return;
+    const n = takeSteps(this.loop, dt);
+    for (let i = 0; i < n; i++) this.stepMatch();
   }
 
   /** One fixed simulation step of a live match. */
@@ -260,7 +253,7 @@ export class App {
     this.overFrames = 0;
     this.resultsIdx = 0;
     this.paused = false;
-    this.acc = 0;
+    this.loop.acc = 0;
     this.fx.clear();
     this.hud.reset();
     this.dummyRecording = false;
@@ -435,7 +428,7 @@ export class App {
     this.labels = r.labels;
     this.rpPlaying = true;
     this.rpSpeed = 1;
-    this.acc = 0;
+    this.loop.acc = 0;
     this.fx.clear();
     this.hud.reset();
     this.screen = 'replay';
@@ -683,9 +676,8 @@ export class App {
   private advanceReplay(dt: number): void {
     const rp = this.rp;
     if (!rp || !this.rpPlaying) return;
-    this.acc += dt * this.rpSpeed;
-    let n = 0;
-    while (this.acc >= STEP_MS && n < 20) {
+    const n = takeSteps(this.loop, dt, 20, this.rpSpeed);
+    for (let i = 0; i < n; i++) {
       if (rp.frame >= rp.length) {
         this.rpPlaying = false;
         break;
@@ -694,10 +686,7 @@ export class App {
       this.renderer.tick(rp.sim, this.chars, ev);
       this.hud.tick(rp.sim);
       this.sfx.handle(ev, rp.sim);
-      this.acc -= STEP_MS;
-      n++;
     }
-    if (n === 20) this.acc = 0;
   }
 
   // ------------------------------------------------------------------ drawing
