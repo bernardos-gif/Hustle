@@ -285,17 +285,24 @@ export function drawFighter(ctx: Ctx, f: FighterState, c: CharacterDef, j: Joint
   }
   limb(ctx, j.shoulder, j.elbowF, j.handF, lw - 1, P, O);
   // fists
-  ctx.fillStyle = c.id === 'riot' ? A : heavy ? S : SK;
-  ctx.beginPath();
-  ctx.arc(hand.x, hand.y, heavy ? 11 : 6.5, 0, Math.PI * 2);
-  ctx.arc(j.handB.x, j.handB.y, heavy ? 10 : 6, 0, Math.PI * 2);
-  ctx.fill();
   if (heavy) {
-    // shoulder pads
-    ctx.fillStyle = S;
+    // shoulder pad (drawn under the fists, offset behind the neck)
+    ctx.fillStyle = flat ?? shade(st.secondary, -0.35);
     ctx.beginPath();
-    ctx.arc(j.shoulder.x, j.shoulder.y, 15, 0, Math.PI * 2);
+    ctx.arc(j.shoulder.x - fc * 4, j.shoulder.y - 4, 11, 0, Math.PI * 2);
     ctx.fill();
+  }
+  ctx.fillStyle = c.id === 'riot' ? A : heavy ? S : SK;
+  ctx.strokeStyle = O;
+  ctx.lineWidth = 2;
+  for (const [p, r] of [
+    [hand, heavy ? 9 : 6.5],
+    [j.handB, heavy ? 8 : 6],
+  ] as [Vec, number][]) {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.fill();
+    if (heavy) ctx.stroke();
   }
 
   if (c.id === 'vesper') {

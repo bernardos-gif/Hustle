@@ -27,6 +27,37 @@ try {
   await page.waitForTimeout(800);
   await page.screenshot({ path: `${outDir}/01-title.png` });
 
+  // Real menu navigation with the keyboard: title -> Versus CPU -> pick both fighters -> difficulty -> fight
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(100);
+  await page.keyboard.press('KeyD'); // move P1 cursor right
+  await page.keyboard.press('KeyJ'); // confirm with P1 light
+  await page.waitForTimeout(100);
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(100);
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(1800);
+  const menuMatch = await page.evaluate(() => ({ screen: window.__app.screen, chars: window.__app.sim?.charIds, phase: window.__app.sim?.state.round.phase }));
+  check(menuMatch.screen === 'match' && menuMatch.chars?.[0] === 'mirage', `menus start a CPU match via keyboard (${JSON.stringify(menuMatch)})`);
+  // P1 walks with D and the fighter actually moves
+  const x0 = await page.evaluate(() => window.__app.sim.state.fighters[0].x);
+  await page.keyboard.down('KeyD');
+  await page.waitForTimeout(500);
+  await page.keyboard.up('KeyD');
+  const x1 = await page.evaluate(() => window.__app.sim.state.fighters[0].x);
+  check(x1 !== x0, `keyboard movement works in a live match (${x0.toFixed(0)} -> ${x1.toFixed(0)})`);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(100);
+  const paused = await page.evaluate(() => window.__app.paused);
+  check(paused, 'Esc opens the pause menu');
+  const f0 = await page.evaluate(() => window.__app.sim.state.frame);
+  await page.waitForTimeout(300);
+  const f1 = await page.evaluate(() => window.__app.sim.state.frame);
+  check(f0 === f1, 'simulation is frozen while paused');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(200);
+  check(!(await page.evaluate(() => window.__app.paused)), 'Esc resumes');
+
   // CPU vs CPU match through the real menus
   await page.evaluate(() => window.__app.startMatch('watch', 'riot', 'bastion'));
   await page.waitForTimeout(6000);
