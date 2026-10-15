@@ -33,6 +33,8 @@ export const CFG = {
     decayFull: 480,
     maxDecay: 0.85,
     minHitstun: 4,
+    /** Max times the same light normal may chain into itself within one combo. */
+    maxLightChain: 3,
     /** Extra gravity applied to juggled fighters as the combo continues. */
     gravityScalingPerSecond: 0.18,
     maxGravityScale: 1.8,
@@ -60,7 +62,7 @@ export const CFG = {
   block: { chipKills: false, pushbackWallTransfer: true, airBlockstunBonus: 2, pushblockCost: 25, pushblockStun: 8, pushblockForce: 9 },
   throwTech: { window: 10, push: 7, stun: 16 },
   landingLag: { default: 4 },
-  knockdown: { soft: 26, hard: 44, getupFrames: 18, wakeInvuln: 18, techRollFrames: 20, airRecoverInvuln: 8, techWindow: 10 },
+  knockdown: { soft: 26, hard: 44, getupFrames: 18, wakeInvuln: 18, techRollFrames: 20, airRecoverInvuln: 8, techWindow: 8 },
   physics: { groundFriction: 0.82, hitstunFriction: 0.9, pushboxStrength: 0.5, wallBounceMinSpeed: 4 },
   clash: { priorityGap: 2, rebound: 4 },
 };

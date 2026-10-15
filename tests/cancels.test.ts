@@ -136,10 +136,10 @@ describe('cancels', () => {
     const opts = a.airOptions;
     let dashed = false;
     run(sim, 12, (i, s2) => {
-      dashed ||= s2.state.fighters[0].state === 'airdash';
+      dashed = dashed || (s2.state.fighters[0].state as string) === 'airdash';
       return i === 0 ? mask(6, ['D']) : 0;
     });
-    expect(dashed || a.state === 'airdash').toBe(true);
+    expect(dashed).toBe(true);
     expect(a.airOptions).toBe(opts - 1);
   });
 

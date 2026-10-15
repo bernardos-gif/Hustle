@@ -734,7 +734,7 @@ export class Sim {
     return true;
   }
 
-  private cancelAllowed(tags: CancelTag[], from: MoveDef | null, cand: MoveDef): boolean {
+  private cancelAllowed(tags: CancelTag[], from: MoveDef | null, cand: MoveDef, f?: FighterState): boolean {
     for (const t of tags) {
       if (t === 'any' && cand.kind !== 'super' && cand.kind !== 'system') return true;
       if (t === 'special' && cand.kind === 'special') return true;
@@ -743,7 +743,9 @@ export class Sim {
       if (t === 'chain' && from && (cand.kind === 'normal' || cand.kind === 'command')) {
         const a = STRENGTH_RANK[from.strength ?? 'M'];
         const b = STRENGTH_RANK[cand.strength ?? 'M'];
-        if (b > a || (a === 1 && b === 1)) return true;
+        if (b > a) return true;
+        // light-into-light chains are limited per combo so jab loops cannot go on forever
+        if (a === 1 && b === 1 && (!f || (this.opp(f).combo.moveCounts[cand.id] ?? 0) < CFG.combo.maxLightChain)) return true;
       }
       if (t.startsWith('#') && cand.id === t.slice(1)) return true;
     }
@@ -764,7 +766,7 @@ export class Sim {
         const d = numpadDir(commandDir(inp, 'D'), f.facing);
         if (f.stance) {
           const sm = this.resolveMove(f, 'D', air);
-          if (sm?.cmd?.stance && (!tags || this.cancelAllowed(tags, from, sm))) {
+          if (sm?.cmd?.stance && (!tags || this.cancelAllowed(tags, from, sm, f))) {
             consume(inp, 'D');
             this.startMove(f, sm.id, { canceled: !!from, feint });
             return true;
@@ -773,7 +775,7 @@ export class Sim {
         if (!air) {
           if (d === 1 || d === 2 || d === 3) {
             const m = this.resolveMove(f, 'D', false);
-            if (!m || (tags && !tags.includes('dash') && !this.cancelAllowed(tags, from, m))) continue;
+            if (!m || (tags && !tags.includes('dash') && !this.cancelAllowed(tags, from, m, f))) continue;
             consume(inp, 'D');
             if (from) this.noteCancel(f, from, m.id);
             this.startMove(f, m.id, { canceled: !!from, feint });
@@ -810,7 +812,7 @@ export class Sim {
       }
       const m = this.resolveMove(f, btn, air);
       if (!m) continue;
-      if (tags && !this.cancelAllowed(tags, from, m)) continue;
+      if (tags && !this.cancelAllowed(tags, from, m, f)) continue;
       consume(inp, btn);
       if (from) this.noteCancel(f, from, m.id);
       this.startMove(f, m.id, { canceled: !!from, feint });
@@ -856,7 +858,7 @@ export class Sim {
       if (!c.cmd || c.hidden) continue;
       if (!!c.cmd.air !== !f.grounded) continue;
       if (c.cmd.stance && c.cmd.stance !== f.stance) continue;
-      if (!this.canStart(f, c) || !this.cancelAllowed(tags, m, c)) continue;
+      if (!this.canStart(f, c) || !this.cancelAllowed(tags, m, c, f)) continue;
       out.push(c);
     }
     return out;
@@ -1033,7 +1035,11 @@ export class Sim {
       o.grabbedBy = -1;
       this.toNeutral(o);
     }
-    // summons that must be protected vanish when their owner is hit
+    this.destroySummons(f);
+  }
+
+  /** Summons that must be protected vanish when their owner is hit or grabbed. */
+  private destroySummons(f: FighterState): void {
     for (const p of this.state.projectiles) {
       if (p.owner === f.idx && !p.dead && this.projDef(p.owner, p.defId)?.ownerHitDestroys) this.killProjectile(p);
     }
@@ -1850,6 +1856,8 @@ export class Sim {
     }
     if (!hit.ignoreDecay) hitstun *= Math.max(0.3, 1 - CFG.combo.repeatHitstunPenalty * repeats);
     hitstun = Math.max(CFG.combo.minHitstun, Math.round(hitstun));
+    // hard anti-infinite: once a combo has run past the decay limit, hits no longer stun
+    if (combo.frames >= CFG.combo.decayFull && !hit.grabHit) hitstun = 0;
 
     combo.scale *= hit.proration ?? CFG.combo.defaultProration;
     if (isProj) {
@@ -1867,6 +1875,7 @@ export class Sim {
     const wasThrown = def.state === 'thrown';
     const keepHeld = hit.grabHit && !hit.release && wasThrown;
     if (def.state === 'move') this.interrupt(def);
+    else this.destroySummons(def);
     if (def.flying) this.endFlight(def);
     def.counterHit = counter;
     def.unburstable = !!hit.unburstable;
