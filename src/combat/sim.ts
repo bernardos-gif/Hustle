@@ -48,6 +48,14 @@ export interface AdvantageTracker {
   defReady: number;
 }
 
+/** Last completed frame-advantage measurement, for the training readout. */
+export interface LastAdvantage {
+  att: number;
+  value: number;
+  kind: 'hit' | 'block';
+  frame: number;
+}
+
 export interface SimState {
   frame: number;
   fighters: [FighterState, FighterState];
@@ -58,6 +66,7 @@ export interface SimState {
   superFreeze: { frames: number; owner: number } | null;
   settings: SimSettings;
   adv: AdvantageTracker | null;
+  lastAdv: LastAdvantage | null;
 }
 
 export interface SimOptions {
@@ -141,6 +150,7 @@ export class Sim {
       superFreeze: null,
       settings,
       adv: null,
+      lastAdv: null,
     };
   }
 
