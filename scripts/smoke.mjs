@@ -7,7 +7,7 @@ import { mkdirSync } from 'node:fs';
 
 const outDir = process.env.SMOKE_OUT ?? 'smoke-output';
 mkdirSync(outDir, { recursive: true });
-const port = 4179;
+const port = Number(process.env.SMOKE_PORT ?? 4179);
 const server = spawn('npx', ['vite', 'preview', '--port', String(port), '--strictPort'], { stdio: 'pipe' });
 await new Promise((r) => setTimeout(r, 2500));
 
