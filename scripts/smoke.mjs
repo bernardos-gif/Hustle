@@ -77,7 +77,11 @@ try {
     s.state.fighters[1].x = s.state.fighters[0].x + 600; // keep the CPU out of the way
     window.__app.ais[1] = null;
   });
-  await page.waitForTimeout(400);
+  // wait until P1 can act (they may still be recovering from a CPU hit), then press the new key
+  for (let i = 0; i < 120; i++) {
+    if (await page.evaluate(() => window.__app.sim.isActionable(window.__app.sim.state.fighters[0]))) break;
+    await page.waitForTimeout(25);
+  }
   await page.keyboard.press('KeyY');
   let jab = false;
   for (let i = 0; i < 20 && !jab; i++) {
