@@ -4,6 +4,9 @@
 import type { Sim } from '../combat/sim';
 import type { CombatEvent } from '../combat/types';
 
+export type UiSound = 'move' | 'confirm' | 'back' | 'lock' | 'error' | 'pause' | 'unpause';
+export type MusicTrack = 'menu' | 'battle' | 'results';
+
 const CHAR_PITCH: Record<string, number> = { vesper: 1.15, mirage: 1.3, solenne: 1.0, bastion: 0.6, riot: 0.95 };
 
 export class Sfx {
@@ -41,6 +44,20 @@ export class Sfx {
 
   unlock(): void {
     this.ensure();
+  }
+
+  /** Menu / interface cue. */
+  ui(_kind: UiSound): void {
+    /* implemented by the audio pass */
+  }
+
+  setMusicVolume(_v: number): void {
+    /* implemented by the audio pass */
+  }
+
+  /** Starts (or crossfades to) a procedural music loop; null stops the music. */
+  music(_track: MusicTrack | null): void {
+    /* implemented by the audio pass */
   }
 
   private noise(dur: number, freq: number, q: number, gain: number, type: BiquadFilterType = 'bandpass'): void {

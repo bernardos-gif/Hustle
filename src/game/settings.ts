@@ -56,6 +56,7 @@ export function defaultBindings(player: 0 | 1): Bindings {
 export interface Settings {
   bindings: [Bindings, Bindings];
   volume: number;
+  musicVolume: number;
   fx: FxSettings;
   showInputs: boolean;
   difficulty: number;
@@ -64,7 +65,7 @@ export interface Settings {
 const KEY = 'hustle-rt-settings-v1';
 
 export function loadSettings(): Settings {
-  const d: Settings = { bindings: [defaultBindings(0), defaultBindings(1)], volume: 0.5, fx: defaultFxSettings(), showInputs: false, difficulty: 1 };
+  const d: Settings = { bindings: [defaultBindings(0), defaultBindings(1)], volume: 0.5, musicVolume: 0.35, fx: defaultFxSettings(), showInputs: false, difficulty: 1 };
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return d;
